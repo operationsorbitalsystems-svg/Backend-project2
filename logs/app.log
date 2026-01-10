@@ -1,0 +1,56 @@
+[2026-01-10 20:40:13] INFO - invoice_parser - FileHandler initialized with temp path: /tmp/invoice_uploads
+[2026-01-10 20:40:13] INFO - invoice_parser - Invoice Parser Backend Started - Debug: True, Log Level: INFO
+[2026-01-10 20:40:13] INFO - invoice_parser - Application startup
+[2026-01-10 20:42:15] INFO - invoice_parser - Session created: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - File saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Retainer-2025Feb.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - File saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Retainer-2025Mar.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - File saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Expenses-2025Jun.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - File saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/AMI.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - File saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/61 TURINTON.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - File saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Devendra Yadav.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - File saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/2425-LLP-2220.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Starting background processing for Amit-TurinTon-Invoice-Retainer-2025Feb.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Parsed invoice: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Retainer-2025Feb.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - JSON result saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Retainer-2025Feb.json
+[2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed Amit-TurinTon-Invoice-Retainer-2025Feb.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Starting background processing for Amit-TurinTon-Invoice-Retainer-2025Mar.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Parsed invoice: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Retainer-2025Mar.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - JSON result saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Retainer-2025Mar.json
+[2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed Amit-TurinTon-Invoice-Retainer-2025Mar.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Starting background processing for Amit-TurinTon-Invoice-Expenses-2025Jun.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Parsed invoice: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Expenses-2025Jun.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - JSON result saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Amit-TurinTon-Invoice-Expenses-2025Jun.json
+[2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed Amit-TurinTon-Invoice-Expenses-2025Jun.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Starting background processing for AMI.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Parsed invoice: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/AMI.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - JSON result saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/AMI.json
+[2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed AMI.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Starting background processing for 61 TURINTON.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Parsed invoice: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/61 TURINTON.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - JSON result saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/61 TURINTON.json
+[2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed 61 TURINTON.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Starting background processing for Devendra Yadav.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Parsed invoice: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Devendra Yadav.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - JSON result saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/Devendra Yadav.json
+[2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed Devendra Yadav.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Starting background processing for 2425-LLP-2220.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:43:54] INFO - invoice_parser - Parsed invoice: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/2425-LLP-2220.pdf
+[2026-01-10 20:43:54] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed
+[2026-01-10 20:43:54] INFO - invoice_parser - JSON result saved: /tmp/invoice_uploads/62aa62f6-c2a2-46de-94ca-dd39c25d19ed/2425-LLP-2220.json
+[2026-01-10 20:43:54] INFO - invoice_parser - Batch 62aa62f6-c2a2-46de-94ca-dd39c25d19ed processing completed
+[2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed 2425-LLP-2220.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
+[2026-01-10 20:50:54] INFO - invoice_parser - Application shutdown
