@@ -3,7 +3,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from datetime import datetime
-# import uvicorn
+import logging
 
 from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH
 from utils.logger import setup_logger
@@ -298,20 +298,43 @@ async def process_invoice_background(batch_id: str, filename: str, pdf_path: str
         # Save JSON
         success, saved_json_path = file_handler.save_json_result(batch_id, filename, result)
         
-        # Update session with results
-        session = session_manager.get_session(batch_id)
-        if session:
-            processed_results = session.get("processed_results", [])
-            processed_results.append(result)
-            session_manager.update_session(batch_id, {"processed_results": processed_results})
-        
         # Update file status to completed
         session_manager.update_file_status(batch_id, filename, "completed")
+        
+        # Update session with results (handle both in-memory dict and Redis string formats)
+        session = session_manager.get_session(batch_id)
+        if session:
+            # Get processed_results - could be list or JSON string depending on storage backend
+            processed_results_raw = session.get("processed_results", [])
+            
+            # Parse if it's a JSON string (Redis case)
+            if isinstance(processed_results_raw, str):
+                try:
+                    processed_results = json.loads(processed_results_raw)
+                except (json.JSONDecodeError, TypeError):
+                    processed_results = []
+            else:
+                processed_results = processed_results_raw if isinstance(processed_results_raw, list) else []
+            
+            # Append result and update session
+            processed_results.append(result)
+            session_manager.update_session(batch_id, {"processed_results": processed_results})
         
         # Check if all files are processed
         session = session_manager.get_session(batch_id)
         if session:
-            files = session.get("files", [])
+            # Get files - could be list or JSON string depending on storage backend
+            files_raw = session.get("files", [])
+            
+            # Parse if it's a JSON string (Redis case)
+            if isinstance(files_raw, str):
+                try:
+                    files = json.loads(files_raw)
+                except (json.JSONDecodeError, TypeError):
+                    files = []
+            else:
+                files = files_raw if isinstance(files_raw, list) else []
+            
             all_processed = all(f["status"] in ["completed", "failed"] for f in files)
             if all_processed:
                 logger.info(f"Batch {batch_id} processing completed")
@@ -328,14 +351,42 @@ async def process_invoice_background(batch_id: str, filename: str, pdf_path: str
 
 
 # ============================================================================
+# BACKGROUND CLEANUP TASK
+# ============================================================================
+
+async def cleanup_old_batches():
+    """
+    Periodic task to clean up old batch directories
+    Runs every 1 hour
+    """
+    while True:
+        try:
+            await asyncio.sleep(3600)  # Run every 1 hour
+            logger.info("🧹 Starting cleanup of old batches...")
+            
+            deleted_count = file_handler.cleanup_old_batches(age_hours=4)
+            
+            if deleted_count > 0:
+                logger.info(f"🧹 Cleaned up {deleted_count} old batch directories")
+            else:
+                logger.info("🧹 No old batches to clean up")
+        
+        except Exception as e:
+            logger.error(f"Error in cleanup task: {str(e)}")
+
+
+# ============================================================================
 # STARTUP/SHUTDOWN EVENTS
 # ============================================================================
 
 @app.on_event("startup")
 async def startup_event():
-    """Startup event - initialize services"""
+    """Startup event - initialize services and start cleanup task"""
     logger.info("Application startup")
-    # Could add periodic cleanup task here if needed
+    
+    # Start background cleanup task
+    asyncio.create_task(cleanup_old_batches())
+    logger.info("🧹 Background cleanup task started (runs every 1 hour)")
 
 
 @app.on_event("shutdown")
@@ -365,12 +416,12 @@ async def general_exception_handler(request, exc):
     }
 
 
-# # ============================================================================
-# # RUN APPLICATION
-# # ============================================================================
+# ============================================================================
+# RUN APPLICATION
+# ============================================================================
 
 # if __name__ == "__main__":
-
+#     import uvicorn
 #     uvicorn.run(
 #         "main:app",
 #         host=HOST,

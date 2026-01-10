@@ -4,8 +4,7 @@ from typing import Dict, Any, Optional
 import json
 import logging
 from config import SESSION_TIMEOUT_SECONDS, REDIS_ENABLED, REDIS_URL
-import redis
-            
+
 logger = logging.getLogger("invoice_parser")
 
 class InMemorySessionManager:
@@ -53,7 +52,21 @@ class InMemorySessionManager:
         if batch_id not in self.sessions:
             return False
         
-        self.sessions[batch_id].update(data)
+        # Ensure lists are stored as lists (not JSON strings)
+        processed_data = data.copy()
+        if "processed_results" in processed_data and isinstance(processed_data["processed_results"], str):
+            try:
+                processed_data["processed_results"] = json.loads(processed_data["processed_results"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
+        if "files" in processed_data and isinstance(processed_data["files"], str):
+            try:
+                processed_data["files"] = json.loads(processed_data["files"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        
+        self.sessions[batch_id].update(processed_data)
         return True
     
     def add_file_to_session(self, batch_id: str, filename: str) -> bool:
@@ -117,7 +130,7 @@ class RedisSessionManager:
     
     def __init__(self):
         try:
-
+            import redis
             self.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
             self.redis_client.ping()
             logger.info("Redis connection established")
@@ -159,6 +172,16 @@ class RedisSessionManager:
         session_data["files"] = json.loads(session_data.get("files", "[]"))
         session_data["file_count"] = int(session_data.get("file_count", 0))
         
+        # Parse processed_results list
+        processed_results_json = session_data.get("processed_results", "[]")
+        if processed_results_json:
+            try:
+                session_data["processed_results"] = json.loads(processed_results_json)
+            except (json.JSONDecodeError, TypeError):
+                session_data["processed_results"] = []
+        else:
+            session_data["processed_results"] = []
+        
         return session_data
     
     def update_session(self, batch_id: str, data: Dict[str, Any]) -> bool:
@@ -168,9 +191,12 @@ class RedisSessionManager:
         if not self.redis_client.exists(key):
             return False
         
-        # Convert files list to JSON if present
-        if "files" in data:
+        # Convert lists to JSON if present
+        if "files" in data and isinstance(data["files"], list):
             data["files"] = json.dumps(data["files"])
+        
+        if "processed_results" in data and isinstance(data["processed_results"], list):
+            data["processed_results"] = json.dumps(data["processed_results"])
         
         self.redis_client.hset(key, mapping=data)
         return True
