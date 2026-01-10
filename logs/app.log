@@ -54,3 +54,52 @@
 [2026-01-10 20:43:54] INFO - invoice_parser - Batch 62aa62f6-c2a2-46de-94ca-dd39c25d19ed processing completed
 [2026-01-10 20:43:54] INFO - invoice_parser - Successfully processed 2425-LLP-2220.pdf (batch: 62aa62f6-c2a2-46de-94ca-dd39c25d19ed)
 [2026-01-10 20:50:54] INFO - invoice_parser - Application shutdown
+[2026-01-10 20:52:11] INFO - invoice_parser - FileHandler initialized with temp path: /tmp/invoice_uploads
+[2026-01-10 20:52:11] INFO - invoice_parser - Mistral client initialized successfully
+[2026-01-10 20:52:11] INFO - invoice_parser - Invoice Parser Backend Started - Debug: True, Log Level: INFO
+[2026-01-10 20:52:11] INFO - invoice_parser - Application startup
+[2026-01-10 20:52:29] INFO - invoice_parser - Session created: 78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - File saved: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467/Amit-TurinTon-Invoice-Retainer-2025Feb.pdf
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - File saved: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467/Amit-TurinTon-Invoice-Retainer-2025Mar.pdf
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - File saved: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467/Amit-TurinTon-Invoice-Expenses-2025Jun.pdf
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - File saved: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467/AMI.pdf
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - File saved: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467/61 TURINTON.pdf
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - File saved: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467/Devendra Yadav.pdf
+[2026-01-10 20:52:44] INFO - invoice_parser - Created batch directory: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467
+[2026-01-10 20:52:44] INFO - invoice_parser - File saved: /tmp/invoice_uploads/78e657c3-b62d-4c63-8c39-6becad785467/2425-LLP-2220.pdf
+[2026-01-10 20:52:44] INFO - invoice_parser - Starting background processing for Amit-TurinTon-Invoice-Retainer-2025Feb.pdf (batch: 78e657c3-b62d-4c63-8c39-6becad785467)
+[2026-01-10 20:52:44] INFO - invoice_parser - Processing with Mistral OCR: Amit-TurinTon-Invoice-Retainer-2025Feb.pdf
+[2026-01-10 20:52:44] ERROR - invoice_parser - ❌ Non-retryable error for Amit-TurinTon-Invoice-Retainer-2025Feb.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] ERROR - invoice_parser - Failed to parse Amit-TurinTon-Invoice-Retainer-2025Feb.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] INFO - invoice_parser - Starting background processing for Amit-TurinTon-Invoice-Retainer-2025Mar.pdf (batch: 78e657c3-b62d-4c63-8c39-6becad785467)
+[2026-01-10 20:52:44] INFO - invoice_parser - Processing with Mistral OCR: Amit-TurinTon-Invoice-Retainer-2025Mar.pdf
+[2026-01-10 20:52:44] ERROR - invoice_parser - ❌ Non-retryable error for Amit-TurinTon-Invoice-Retainer-2025Mar.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] ERROR - invoice_parser - Failed to parse Amit-TurinTon-Invoice-Retainer-2025Mar.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] INFO - invoice_parser - Starting background processing for Amit-TurinTon-Invoice-Expenses-2025Jun.pdf (batch: 78e657c3-b62d-4c63-8c39-6becad785467)
+[2026-01-10 20:52:44] INFO - invoice_parser - Processing with Mistral OCR: Amit-TurinTon-Invoice-Expenses-2025Jun.pdf
+[2026-01-10 20:52:44] ERROR - invoice_parser - ❌ Non-retryable error for Amit-TurinTon-Invoice-Expenses-2025Jun.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] ERROR - invoice_parser - Failed to parse Amit-TurinTon-Invoice-Expenses-2025Jun.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] INFO - invoice_parser - Starting background processing for AMI.pdf (batch: 78e657c3-b62d-4c63-8c39-6becad785467)
+[2026-01-10 20:52:44] INFO - invoice_parser - Processing with Mistral OCR: AMI.pdf
+[2026-01-10 20:52:44] ERROR - invoice_parser - ❌ Non-retryable error for AMI.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] ERROR - invoice_parser - Failed to parse AMI.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] INFO - invoice_parser - Starting background processing for 61 TURINTON.pdf (batch: 78e657c3-b62d-4c63-8c39-6becad785467)
+[2026-01-10 20:52:44] INFO - invoice_parser - Processing with Mistral OCR: 61 TURINTON.pdf
+[2026-01-10 20:52:44] ERROR - invoice_parser - ❌ Non-retryable error for 61 TURINTON.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] ERROR - invoice_parser - Failed to parse 61 TURINTON.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] INFO - invoice_parser - Starting background processing for Devendra Yadav.pdf (batch: 78e657c3-b62d-4c63-8c39-6becad785467)
+[2026-01-10 20:52:44] INFO - invoice_parser - Processing with Mistral OCR: Devendra Yadav.pdf
+[2026-01-10 20:52:44] ERROR - invoice_parser - ❌ Non-retryable error for Devendra Yadav.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] ERROR - invoice_parser - Failed to parse Devendra Yadav.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] INFO - invoice_parser - Starting background processing for 2425-LLP-2220.pdf (batch: 78e657c3-b62d-4c63-8c39-6becad785467)
+[2026-01-10 20:52:44] INFO - invoice_parser - Processing with Mistral OCR: 2425-LLP-2220.pdf
+[2026-01-10 20:52:44] ERROR - invoice_parser - ❌ Non-retryable error for 2425-LLP-2220.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:52:44] ERROR - invoice_parser - Failed to parse 2425-LLP-2220.pdf: No document_annotation returned from Mistral OCR
+[2026-01-10 20:53:10] INFO - invoice_parser - Application shutdown

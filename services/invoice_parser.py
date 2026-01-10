@@ -1,5 +1,7 @@
 import json
 import logging
+import base64
+import asyncio
 from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
 from config import MISTRAL_API_KEY
@@ -9,83 +11,154 @@ logger = logging.getLogger("invoice_parser")
 
 
 class InvoiceParser:
-    """Handles invoice parsing using Mistral AI"""
+    """Handles invoice parsing using Mistral OCR with real API integration"""
     
     def __init__(self):
         self.api_key = MISTRAL_API_KEY
-        if not self.api_key:
+        self.client = None
+        self.semaphore = asyncio.Semaphore(10)  # Max concurrent API calls
+        
+        if self.api_key:
+            try:
+                from mistralai import Mistral
+                self.client = Mistral(api_key=self.api_key)
+                logger.info("Mistral client initialized successfully")
+            except ImportError:
+                logger.warning(
+                    "mistralai package not found. Install with: "
+                    "pip install mistralai --break-system-packages"
+                )
+                self.client = None
+        else:
             logger.warning("MISTRAL_API_KEY not set. Parsing will use mock data.")
+    
+    @staticmethod
+    def encode_pdf_to_base64(pdf_path: str) -> str:
+        """Encode PDF file to base64 string"""
+        try:
+            with open(pdf_path, "rb") as pdf_file:
+                return base64.b64encode(pdf_file.read()).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Error encoding PDF: {str(e)}")
+            raise
+    
+    @staticmethod
+    def is_retryable_error(error: Exception) -> bool:
+        """Check if error is retryable (500 errors, service unavailable, etc.)"""
+        error_str = str(error).lower()
+        retryable_indicators = [
+            "500", "503", "502", "504",
+            "service unavailable",
+            "internal server error",
+            "bad gateway",
+            "gateway timeout",
+            "timeout"
+        ]
+        return any(indicator in error_str for indicator in retryable_indicators)
     
     async def parse_invoice(self, pdf_path: str) -> Tuple[bool, Optional[InvoiceData], Optional[str]]:
         """
         Parse a single invoice PDF using Mistral OCR
         Returns: (success, invoice_data, error_message)
         """
-        try:
-            # For MVP: Return mock data
-            # In production, integrate with Mistral API
-            invoice_data = self._generate_mock_invoice()
-            logger.info(f"Parsed invoice: {pdf_path}")
-            return True, invoice_data, None
         
-        except Exception as e:
-            error_msg = f"Failed to parse invoice: {str(e)}"
-            logger.error(error_msg)
-            return False, None, error_msg
+        # Use Mistral API with retry logic
+        return await self.parse_invoice_with_mistral(pdf_path)
     
-    async def parse_invoice_with_mistral(self, pdf_path: str) -> Tuple[bool, Optional[InvoiceData], Optional[str]]:
+    async def parse_invoice_with_mistral(self, pdf_path: str, max_retries: int = 4) -> Tuple[bool, Optional[InvoiceData], Optional[str]]:
         """
-        Parse invoice using actual Mistral API
-        This is a placeholder for future implementation
-        """
-        try:
-            # This would be the real Mistral integration
-            # For now, keeping it as fallback/reference
-            logger.info("Mistral API parsing would go here")
-            return False, None, "Mistral API integration pending"
+        Parse invoice using actual Mistral OCR API with retry logic
         
-        except Exception as e:
-            return False, None, str(e)
+        Args:
+            pdf_path: Path to the PDF file
+            max_retries: Maximum number of retries (default: 4)
+        
+        Returns:
+            Tuple of (success, invoice_data, error_message)
+        """
+        filename = Path(pdf_path).name
+        
+        async with self.semaphore:
+            for attempt in range(max_retries + 1):  # +1 for initial attempt
+                try:
+                    if attempt > 0:
+                        logger.info(f"🔄 Retry {attempt}/{max_retries}: {filename}")
+                    else:
+                        logger.info(f"Processing with Mistral OCR: {filename}")
+                    
+                    # Encode PDF to base64
+                    base64_pdf = await asyncio.to_thread(
+                        self.encode_pdf_to_base64,
+                        pdf_path
+                    )
+                    
+                    # Create JSON schema for structured output
+                    invoice_schema = InvoiceData.model_json_schema()
+                    
+                    # Call Mistral OCR API with structured output
+                    ocr_response = await asyncio.to_thread(
+                        self.client.ocr.process_async,
+                        model="mistral-ocr-latest",
+                        document={
+                            "type": "document_url",
+                            "document_url": f"data:application/pdf;base64,{base64_pdf}"
+                        },
+                        document_annotation_format={
+                            "type": "json_schema",
+                            "json_schema": {
+                                "name": "InvoiceData",
+                                "description": "Structured invoice data extraction",
+                                "schema": invoice_schema,
+                                "strict": True
+                            }
+                        }
+                    )
+                    
+                    # Parse document_annotation from response
+                    if hasattr(ocr_response, 'document_annotation') and ocr_response.document_annotation:
+                        try:
+                            annotation_dict = json.loads(ocr_response.document_annotation)
+                            invoice_data = InvoiceData.model_validate(annotation_dict)
+                            
+                            logger.info(
+                                f"✅ Successfully parsed {filename} → "
+                                f"Invoice: {invoice_data.header.invoice_number} | "
+                                f"Total: {invoice_data.currency} {invoice_data.total_amount:,.2f}"
+                            )
+                            return True, invoice_data, None
+                        
+                        except json.JSONDecodeError as e:
+                            error_msg = f"Failed to parse Mistral response JSON: {str(e)}"
+                            logger.error(error_msg)
+                            return False, None, error_msg
+                        
+                        except Exception as e:
+                            error_msg = f"Failed to validate invoice data: {str(e)}"
+                            logger.error(error_msg)
+                            return False, None, error_msg
+                    else:
+                        raise ValueError("No document_annotation returned from Mistral OCR")
+                
+                except Exception as e:
+                    # Check if we should retry
+                    if attempt < max_retries and self.is_retryable_error(e):
+                        wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s
+                        logger.warning(
+                            f"Retryable error for {filename}, waiting {wait_time}s before "
+                            f"retry {attempt + 1}/{max_retries}: {str(e)}"
+                        )
+                        await asyncio.sleep(wait_time)
+                    else:
+                        # Final failure or non-retryable error
+                        error_msg = str(e)
+                        if attempt == max_retries:
+                            logger.error(f"❌ Failed to parse {filename} after {max_retries} retries: {error_msg}")
+                        else:
+                            logger.error(f"❌ Non-retryable error for {filename}: {error_msg}")
+                        return False, None, error_msg
+        
+        return False, None, f"Failed to parse {filename} after all retries"
     
-    def _generate_mock_invoice(self) -> InvoiceData:
-        """Generate mock invoice data for development/testing"""
-        header = InvoiceHeader(
-            invoice_number="INV-001",
-            invoice_date="2026-01-10",
-            vendor_name="Sample Vendor Inc.",
-            vendor_address="123 Business Street, City, State 12345",
-            vendor_gstin="GSTIN123456",
-            place_of_supply="State 1"
-        )
-        
-        line_items = [
-            InvoiceLineItem(
-                description="Service A",
-                quantity=1,
-                unit_price=1000.00,
-                amount=1000.00
-            ),
-            InvoiceLineItem(
-                description="Service B",
-                quantity=2,
-                unit_price=500.00,
-                amount=1000.00
-            )
-        ]
-        
-        invoice_data = InvoiceData(
-            header=header,
-            line_items=line_items,
-            subtotal=2000.00,
-            cgst_tax_amount=180.00,
-            sgst_tax_amount=180.00,
-            igst_tax_amount=0.00,
-            total_amount=2360.00,
-            currency="INR",
-            already_recieved=0.00
-        )
-        
-        return invoice_data
     
     def extract_metadata(self, invoice_data: InvoiceData) -> Dict[str, Any]:
         """
