@@ -84,7 +84,7 @@ async def create_session():
 
 
 @app.post("/api/sessions/{batch_id}/upload", response_model=UploadResponse, status_code=202, tags=["Files"])
-async def upload_files(batch_id: str, files: List[UploadFile] = File(...), background_tasks: BackgroundTasks = None):
+async def upload_files(batch_id: str, files: List[UploadFile] = File(...)):
     """
     Upload PDF files for batch processing
     
@@ -139,15 +139,11 @@ async def upload_files(batch_id: str, files: List[UploadFile] = File(...), backg
                 if success:
                     session_manager.add_file_to_session(batch_id, file.filename)
                     saved_count += 1
-                    
-                    # Start background processing task
-                    if background_tasks:
-                        background_tasks.add_task(
-                            process_invoice_background,
-                            batch_id,
-                            file.filename,
-                            pdf_path
-                        )
+
+                    # Start background processing task (global event loop)
+                    asyncio.create_task(
+                        process_invoice_background(batch_id, file.filename, pdf_path)
+                    )
                 else:
                     logger.warning(f"Failed to save file {file.filename}: {msg}")
             
