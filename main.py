@@ -3,7 +3,7 @@ from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List
 from datetime import datetime
-import logging
+import uvicorn
 
 from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH
 from utils.logger import setup_logger
@@ -370,7 +370,7 @@ async def general_exception_handler(request, exc):
 # ============================================================================
 
 if __name__ == "__main__":
-    import uvicorn
+
     uvicorn.run(
         "main:app",
         host=HOST,

@@ -1,12 +1,20 @@
 import os
 import json
 from dotenv import load_dotenv
+import asyncio
+
 
 load_dotenv()
+
 
 # API & Server
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+
+MAX_MISTRAL_CONCURRENT = int(os.getenv("MAX_MISTRAL_CONCURRENT", "5"))
+
+
+mistral_semaphore = asyncio.Semaphore(MAX_MISTRAL_CONCURRENT)
 
 # Mistral AI
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")

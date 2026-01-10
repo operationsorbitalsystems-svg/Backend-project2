@@ -4,10 +4,14 @@ import base64
 import asyncio
 from typing import Dict, Any, Tuple, Optional
 from pathlib import Path
-from config import MISTRAL_API_KEY
+from config import MISTRAL_API_KEY, mistral_semaphore
 from models import InvoiceData, InvoiceHeader, InvoiceLineItem
 
 logger = logging.getLogger("invoice_parser")
+
+
+#global_semaphore_initialization
+
 
 
 class InvoiceParser:
@@ -16,7 +20,10 @@ class InvoiceParser:
     def __init__(self):
         self.api_key = MISTRAL_API_KEY
         self.client = None
-        self.semaphore = asyncio.Semaphore(10)  # Max concurrent API calls
+        
+        global mistral_semaphore
+        
+        self.semaphore = mistral_semaphore 
         
         if self.api_key:
             try:
@@ -78,26 +85,26 @@ class InvoiceParser:
         """
         filename = Path(pdf_path).name
         
-        async with self.semaphore:
-            for attempt in range(max_retries + 1):  # +1 for initial attempt
-                try:
-                    if attempt > 0:
-                        logger.info(f"🔄 Retry {attempt}/{max_retries}: {filename}")
-                    else:
-                        logger.info(f"Processing with Mistral OCR: {filename}")
-                    
-                    # Encode PDF to base64
-                    base64_pdf = await asyncio.to_thread(
-                        self.encode_pdf_to_base64,
-                        pdf_path
-                    )
-                    
-                    # Create JSON schema for structured output
-                    invoice_schema = InvoiceData.model_json_schema()
-                    
+
+        for attempt in range(max_retries + 1):  # +1 for initial attempt
+            try:
+                if attempt > 0:
+                    logger.info(f"🔄 Retry {attempt}/{max_retries}: {filename}")
+                else:
+                    logger.info(f"Processing with Mistral OCR: {filename}")
+                
+                # Encode PDF to base64
+                base64_pdf = await asyncio.to_thread(
+                    self.encode_pdf_to_base64,
+                    pdf_path
+                )
+                
+                # Create JSON schema for structured output
+                invoice_schema = InvoiceData.model_json_schema()
+                
+                async with self.semaphore:
                     # Call Mistral OCR API with structured output
-                    ocr_response = await asyncio.to_thread(
-                        self.client.ocr.process_async,
+                    ocr_response = await self.client.ocr.process_async(
                         model="mistral-ocr-latest",
                         document={
                             "type": "document_url",
@@ -113,50 +120,51 @@ class InvoiceParser:
                             }
                         }
                     )
-                    
-                    # Parse document_annotation from response
-                    if hasattr(ocr_response, 'document_annotation') and ocr_response.document_annotation:
-                        try:
-                            annotation_dict = json.loads(ocr_response.document_annotation)
-                            invoice_data = InvoiceData.model_validate(annotation_dict)
-                            
-                            logger.info(
-                                f"✅ Successfully parsed {filename} → "
-                                f"Invoice: {invoice_data.header.invoice_number} | "
-                                f"Total: {invoice_data.currency} {invoice_data.total_amount:,.2f}"
-                            )
-                            return True, invoice_data, None
-                        
-                        except json.JSONDecodeError as e:
-                            error_msg = f"Failed to parse Mistral response JSON: {str(e)}"
-                            logger.error(error_msg)
-                            return False, None, error_msg
-                        
-                        except Exception as e:
-                            error_msg = f"Failed to validate invoice data: {str(e)}"
-                            logger.error(error_msg)
-                            return False, None, error_msg
-                    else:
-                        raise ValueError("No document_annotation returned from Mistral OCR")
                 
-                except Exception as e:
-                    # Check if we should retry
-                    if attempt < max_retries and self.is_retryable_error(e):
-                        wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s
-                        logger.warning(
-                            f"Retryable error for {filename}, waiting {wait_time}s before "
-                            f"retry {attempt + 1}/{max_retries}: {str(e)}"
+                
+                # Parse document_annotation from response
+                if hasattr(ocr_response, 'document_annotation') and ocr_response.document_annotation:
+                    try:
+                        annotation_dict = json.loads(ocr_response.document_annotation)
+                        invoice_data = InvoiceData.model_validate(annotation_dict)
+                        
+                        logger.info(
+                            f"✅ Successfully parsed {filename} → "
+                            f"Invoice: {invoice_data.header.invoice_number} | "
+                            f"Total: {invoice_data.currency} {invoice_data.total_amount:,.2f}"
                         )
-                        await asyncio.sleep(wait_time)
-                    else:
-                        # Final failure or non-retryable error
-                        error_msg = str(e)
-                        if attempt == max_retries:
-                            logger.error(f"❌ Failed to parse {filename} after {max_retries} retries: {error_msg}")
-                        else:
-                            logger.error(f"❌ Non-retryable error for {filename}: {error_msg}")
+                        return True, invoice_data, None
+                    
+                    except json.JSONDecodeError as e:
+                        error_msg = f"Failed to parse Mistral response JSON: {str(e)}"
+                        logger.error(error_msg)
                         return False, None, error_msg
-        
+                    
+                    except Exception as e:
+                        error_msg = f"Failed to validate invoice data: {str(e)}"
+                        logger.error(error_msg)
+                        return False, None, error_msg
+                else:
+                    raise ValueError("No document_annotation returned from Mistral OCR")
+            
+            except Exception as e:
+                # Check if we should retry
+                if attempt < max_retries and self.is_retryable_error(e):
+                    wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s, 8s
+                    logger.warning(
+                        f"Retryable error for {filename}, waiting {wait_time}s before "
+                        f"retry {attempt + 1}/{max_retries}: {str(e)}"
+                    )
+                    await asyncio.sleep(wait_time)
+                else:
+                    # Final failure or non-retryable error
+                    error_msg = str(e)
+                    if attempt == max_retries:
+                        logger.error(f"❌ Failed to parse {filename} after {max_retries} retries: {error_msg}")
+                    else:
+                        logger.error(f"❌ Non-retryable error for {filename}: {error_msg}")
+                    return False, None, error_msg
+    
         return False, None, f"Failed to parse {filename} after all retries"
     
     
