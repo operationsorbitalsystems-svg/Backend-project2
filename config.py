@@ -2,6 +2,7 @@ import os
 import json
 from dotenv import load_dotenv
 import asyncio
+import redis.asyncio as redis
 
 
 load_dotenv()
@@ -31,6 +32,15 @@ REDIS_ENABLED = os.getenv("REDIS_ENABLED", "false").lower() == "true"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 SESSION_TIMEOUT_HOURS = int(os.getenv("SESSION_TIMEOUT_HOURS", "4"))
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
+
+# Initialize Redis client for task queue
+redis_client = None
+if REDIS_ENABLED:
+    try:
+        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    except Exception as e:
+        import logging
+        logging.warning(f"Failed to connect to Redis: {e}")
 
 # File Handling
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "50000000"))  # 50MB per file

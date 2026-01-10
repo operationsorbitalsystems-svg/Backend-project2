@@ -5,7 +5,7 @@ from typing import List
 from datetime import datetime
 import logging
 
-from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH
+from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT
 from utils.logger import setup_logger
 from models import (
     SessionCreateResponse, BatchStatusResponse, UploadResponse, 
@@ -14,6 +14,7 @@ from models import (
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
 from services.invoice_parser import InvoiceParser
+from services.task_queue import get_task_queue_manager
 
 # Setup logger
 logger = setup_logger(debug=DEBUG)
@@ -38,6 +39,7 @@ app.add_middleware(
 session_manager = get_session_manager()
 file_handler = FileHandler()
 invoice_parser = InvoiceParser()
+task_queue = get_task_queue_manager()
 
 logger.info(f"Invoice Parser Backend Started - Debug: {DEBUG}, Log Level: {LOG_LEVEL}")
 
@@ -140,10 +142,8 @@ async def upload_files(batch_id: str, files: List[UploadFile] = File(...)):
                     session_manager.add_file_to_session(batch_id, file.filename)
                     saved_count += 1
 
-                    # Start background processing task (global event loop)
-                    asyncio.create_task(
-                        process_invoice_background(batch_id, file.filename, pdf_path)
-                    )
+                    # Add to task queue for fair processing
+                    await task_queue.enqueue_file(batch_id, file.filename, pdf_path)
                 else:
                     logger.warning(f"Failed to save file {file.filename}: {msg}")
             
@@ -379,7 +379,14 @@ async def cleanup_old_batches():
 async def startup_event():
     """Startup event - initialize services and start cleanup task"""
     logger.info("Application startup")
-    
+
+    # Recover crashed tasks from Redis
+    await task_queue.recover_crashed_tasks()
+
+    # Start worker pool
+    await task_queue.start_workers(num_workers=MAX_MISTRAL_CONCURRENT)
+    logger.info(f"✅ Started {MAX_MISTRAL_CONCURRENT} task queue workers")
+
     # Start background cleanup task
     asyncio.create_task(cleanup_old_batches())
     logger.info("🧹 Background cleanup task started (runs every 1 hour)")

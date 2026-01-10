@@ -91,3 +91,14 @@ class UploadResponse(BaseModel):
 class ErrorResponse(BaseModel):
     detail: str
     status_code: int
+
+
+# === Task Queue Models ===
+
+class TaskItem(BaseModel):
+    """Represents a task in the processing queue"""
+    task_id: str
+    batch_id: str
+    filename: str
+    pdf_path: str
+    enqueued_at: str  # ISO timestamp

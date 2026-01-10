@@ -5,5 +5,5 @@ python-dotenv
 pydantic
 mistralai
 aiofiles
-redis
+redis>=5.0.0
 httpx
