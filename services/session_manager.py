@@ -4,7 +4,8 @@ from typing import Dict, Any, Optional
 import json
 import logging
 from config import SESSION_TIMEOUT_SECONDS, REDIS_ENABLED, REDIS_URL
-
+import redis
+            
 logger = logging.getLogger("invoice_parser")
 
 class InMemorySessionManager:
@@ -116,7 +117,7 @@ class RedisSessionManager:
     
     def __init__(self):
         try:
-            import redis
+
             self.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
             self.redis_client.ping()
             logger.info("Redis connection established")
