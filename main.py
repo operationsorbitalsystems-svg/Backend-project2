@@ -15,6 +15,7 @@ from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
 from services.invoice_parser import InvoiceParser
 from services.task_queue import get_task_queue_manager
+from coa_parser import parse_coa
 
 # Setup logger
 logger = setup_logger(debug=DEBUG)
@@ -86,7 +87,7 @@ async def create_session():
 
 
 @app.post("/api/sessions/{batch_id}/upload", response_model=UploadResponse, status_code=202, tags=["Files"])
-async def upload_files(batch_id: str, files: List[UploadFile] = File(...)):
+async def upload_files(batch_id: str, coa_file : UploadFile , files: List[UploadFile] = File(...)):
     """
     Upload PDF files for batch processing
     
@@ -107,6 +108,9 @@ async def upload_files(batch_id: str, files: List[UploadFile] = File(...)):
             logger.warning(f"Session not found: {batch_id}")
             raise HTTPException(status_code=404, detail="Batch not found or expired")
         
+        if not coa_file:
+            raise HTTPException(status_code=400, detail="NO COA file provided")
+        
         # Validate file count
         if not files or len(files) == 0:
             raise HTTPException(status_code=400, detail="No files provided")
@@ -116,6 +120,7 @@ async def upload_files(batch_id: str, files: List[UploadFile] = File(...)):
                 status_code=413, 
                 detail=f"Too many files. Maximum {MAX_FILES_PER_BATCH} allowed"
             )
+        
         
         # Create batch directory
         file_handler.create_batch_directory(batch_id)
