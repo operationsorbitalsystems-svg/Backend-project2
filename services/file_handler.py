@@ -87,7 +87,7 @@ class FileHandler:
             logger.error(f"Error cleaning up batch {batch_id}: {str(e)}")
             return False
     
-    def cleanup_old_batches(self, age_hours: int = 4) -> int:
+    def cleanup_old_batches(self, age_hours: int = 1) -> int:
         """
         Delete batches older than specified hours
         Returns: number of batches deleted

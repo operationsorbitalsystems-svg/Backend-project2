@@ -28,7 +28,7 @@ except json.JSONDecodeError:
     CORS_ORIGINS = ["http://localhost:3000", "http://localhost:5173"]
 
 # Session Management
-REDIS_ENABLED = os.getenv("REDIS_ENABLED", "false").lower() == "true"
+REDIS_ENABLED = os.getenv("REDIS_ENABLED", "true").lower() == "true"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 SESSION_TIMEOUT_HOURS = int(os.getenv("SESSION_TIMEOUT_HOURS", "4"))
 SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
