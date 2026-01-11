@@ -118,7 +118,7 @@ def build_hierarchy(sentences: List[Sentence]) -> List[Dict]:
         parent['children'].append(node)
         stack.append(node)
 
-        logger.debug(f"Added '{sentence.text}' at level {sentence.level}")
+        # logger.debug(f"Added '{sentence.text}' at level {sentence.level}")
 
     logger.info(f"Built hierarchy with {len(root['children'])} root children")
     return root['children']

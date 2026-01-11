@@ -8,8 +8,9 @@ import logging
 from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT
 from utils.logger import setup_logger
 from models import (
-    SessionCreateResponse, BatchStatusResponse, UploadResponse, 
-    FileStatus, ProcessedInvoiceResult
+    SessionCreateResponse, BatchStatusResponse, UploadResponse,
+    FileStatus, ProcessedInvoiceResult,
+    COAStatus, COAMetadata, COAData
 )
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
@@ -87,7 +88,7 @@ async def create_session():
 
 
 @app.post("/api/sessions/{batch_id}/upload", response_model=UploadResponse, status_code=202, tags=["Files"])
-async def upload_files(batch_id: str, coa_file : UploadFile , files: List[UploadFile] = File(...)):
+async def upload_files(batch_id: str, coa_file: UploadFile = File(...), files: List[UploadFile] = File(...)):
     """
     Upload PDF files for batch processing
     
@@ -107,9 +108,59 @@ async def upload_files(batch_id: str, coa_file : UploadFile , files: List[Upload
         if not session:
             logger.warning(f"Session not found: {batch_id}")
             raise HTTPException(status_code=404, detail="Batch not found or expired")
-        
-        if not coa_file:
-            raise HTTPException(status_code=400, detail="NO COA file provided")
+
+        # === Process COA File ===
+        if not coa_file or not coa_file.filename:
+            raise HTTPException(status_code=400, detail="COA file is required")
+
+        if not coa_file.filename.lower().endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="COA file must be a PDF")
+
+        try:
+            # Read COA file content
+            coa_content = await coa_file.read()
+
+            # Save COA PDF
+            success, msg, coa_pdf_path = file_handler.save_coa_file(
+                batch_id, coa_file.filename, coa_content
+            )
+
+            if not success:
+                raise HTTPException(status_code=400, detail=f"Failed to save COA file: {msg}")
+
+            # Get COA JSON path
+            coa_json_path = file_handler.get_coa_json_path(batch_id)
+
+            # Store COA paths in session
+            session_manager.set_coa_paths(batch_id, coa_file.filename, coa_pdf_path, coa_json_path)
+
+            # Parse COA immediately (synchronous)
+            logger.info(f"Parsing COA file: {coa_pdf_path}")
+            coa_output = parse_coa(coa_pdf_path, debug=False)
+
+            # Save COA output as JSON
+            import json
+            with open(coa_json_path, 'w') as f:
+                json.dump(coa_output.model_dump(mode='json'), f, indent=2, default=str)
+
+            # Extract metadata for session
+            coa_metadata = {
+                "total_pages": coa_output.metadata.total_pages,
+                "total_groups": coa_output.metadata.total_groups,
+                "total_ledgers": coa_output.metadata.total_ledgers,
+                "levels_discovered": coa_output.metadata.levels_discovered
+            }
+
+            # Update COA status to "parsed"
+            session_manager.update_coa_status(batch_id, "parsed", coa_metadata=coa_metadata)
+            logger.info(f"COA parsed successfully for batch {batch_id}")
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error processing COA file: {str(e)}")
+            session_manager.update_coa_status(batch_id, "failed", error=str(e))
+            raise HTTPException(status_code=500, detail=f"Failed to process COA file: {str(e)}")
         
         # Validate file count
         if not files or len(files) == 0:
@@ -165,6 +216,7 @@ async def upload_files(batch_id: str, coa_file : UploadFile , files: List[Upload
         return UploadResponse(
             batch_id=batch_id,
             received_files=saved_count,
+            coa_received=True,
             status="processing",
             message=f"Files received. Processing started."
         )
@@ -230,6 +282,35 @@ async def get_batch_status(batch_id: str):
                 error=file_record.get("error")
             )
             file_statuses.append(file_status)
+
+        # === Build COA Status ===
+        coa_status_obj = None
+        coa_data_obj = None
+
+        if session.get("coa_filename"):
+            # Build COA status
+            coa_metadata_dict = session.get("coa_metadata")
+            coa_metadata_obj = None
+            if coa_metadata_dict:
+                coa_metadata_obj = COAMetadata(**coa_metadata_dict)
+
+            coa_status_obj = COAStatus(
+                filename=session.get("coa_filename"),
+                status=session.get("coa_status", "pending"),
+                parsed_at=datetime.fromisoformat(session["coa_parsed_at"]) if session.get("coa_parsed_at") else None,
+                error=session.get("coa_error"),
+                metadata=coa_metadata_obj
+            )
+
+            # Load full COA data from JSON file if parsed successfully
+            if session.get("coa_status") == "parsed":
+                coa_json_data = file_handler.read_coa_json(batch_id)
+                if coa_json_data:
+                    coa_data_obj = COAData(
+                        metadata=coa_json_data.get("metadata", {}),
+                        hierarchy=coa_json_data.get("hierarchy", {}),
+                        flat_list=coa_json_data.get("flat_list", [])
+                    )
         
         # Get processed results from session data
         processed_results = session.get("processed_results", [])
@@ -252,6 +333,8 @@ async def get_batch_status(batch_id: str):
             pending=pending,
             failed=failed,
             file_statuses=file_statuses,
+            coa_status=coa_status_obj,
+            coa_data=coa_data_obj,
             data=results_data if results_data else None,
             completed_at=datetime.fromisoformat(session.get("completed_at")) if session.get("completed_at") else None
         )

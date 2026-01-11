@@ -1,7 +1,7 @@
 import os
 import shutil
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 import logging
 from config import TEMP_STORAGE_PATH, MAX_FILES_PER_BATCH
 from utils.validators import validate_pdf_file, validate_file_size
@@ -131,13 +131,83 @@ class FileHandler:
             batch_dir = self.create_batch_directory(batch_id)
             json_filename = filename.replace('.pdf', '.json')
             json_path = batch_dir / json_filename
-            
+
             with open(json_path, 'w') as f:
                 json.dump(json_data, f, indent=2)
-            
+
             logger.info(f"JSON result saved: {json_path}")
             return True, str(json_path)
-        
+
         except Exception as e:
             logger.error(f"Error saving JSON result: {str(e)}")
             return False, ""
+
+    def create_coa_directory(self, batch_id: str) -> Path:
+        """Create COA subdirectory within batch directory"""
+        coa_dir = self.temp_path / batch_id / "COA"
+        coa_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Created COA directory: {coa_dir}")
+        return coa_dir
+
+    def get_coa_directory(self, batch_id: str) -> Path:
+        """Get the COA subdirectory path"""
+        return self.temp_path / batch_id / "COA"
+
+    def get_coa_pdf_path(self, batch_id: str, filename: str) -> str:
+        """Get path where COA PDF will be stored"""
+        return str(self.get_coa_directory(batch_id) / filename)
+
+    def get_coa_json_path(self, batch_id: str) -> str:
+        """Get path where COA JSON will be stored"""
+        return str(self.get_coa_directory(batch_id) / "coa.json")
+
+    def save_coa_file(self, batch_id: str, filename: str, file_content: bytes) -> Tuple[bool, str, str]:
+        """
+        Save uploaded COA PDF to batch COA directory
+        Returns: (success, message, file_path)
+        """
+        try:
+            # Validate file size
+            is_valid, msg = validate_file_size(len(file_content))
+            if not is_valid:
+                return False, msg, ""
+
+            # Create COA directory
+            coa_dir = self.create_coa_directory(batch_id)
+
+            # Save file
+            file_path = coa_dir / filename
+            with open(file_path, 'wb') as f:
+                f.write(file_content)
+
+            # Validate PDF
+            is_valid, msg = validate_pdf_file(str(file_path), filename)
+            if not is_valid:
+                file_path.unlink()  # Delete invalid file
+                return False, f"Invalid PDF: {msg}", ""
+
+            logger.info(f"COA file saved: {file_path}")
+            return True, "COA file saved successfully", str(file_path)
+
+        except Exception as e:
+            logger.error(f"Error saving COA file {filename}: {str(e)}")
+            return False, f"Error saving COA file: {str(e)}", ""
+
+    def read_coa_json(self, batch_id: str) -> Optional[dict]:
+        """Read parsed COA JSON from file"""
+        try:
+            import json
+            json_path = self.get_coa_json_path(batch_id)
+
+            if not Path(json_path).exists():
+                logger.warning(f"COA JSON not found: {json_path}")
+                return None
+
+            with open(json_path, 'r') as f:
+                coa_data = json.load(f)
+
+            return coa_data
+
+        except Exception as e:
+            logger.error(f"Error reading COA JSON: {str(e)}")
+            return None
