@@ -2,7 +2,7 @@ import json
 import logging
 import base64
 import asyncio
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 from pathlib import Path
 from config import MISTRAL_API_KEY, mistral_semaphore
 from models import InvoiceData, InvoiceHeader, InvoiceLineItem
@@ -210,17 +210,29 @@ class InvoiceParser:
         
         return True, ""
     
-    def format_invoice_response(self, 
+    def format_invoice_response(self,
                                filename: str,
                                pdf_path: str,
                                json_path: str,
                                invoice_data: Optional[InvoiceData],
-                               error: Optional[str] = None) -> Dict[str, Any]:
+                               error: Optional[str] = None,
+                               xl_output: Optional[List[dict]] = None) -> Dict[str, Any]:
         """
         Format invoice data into response structure
+
+        Args:
+            filename: Invoice filename
+            pdf_path: Path to PDF file
+            json_path: Path to JSON result file
+            invoice_data: Parsed invoice data
+            error: Error message if any
+            xl_output: XL output rows for journal entry import
+
+        Returns:
+            Formatted response dictionary
         """
         from datetime import datetime
-        
+
         if error or not invoice_data:
             return {
                 "filename": filename,
@@ -230,9 +242,9 @@ class InvoiceParser:
                 "error": error,
                 "timestamp": datetime.utcnow().isoformat()
             }
-        
+
         metadata = self.extract_metadata(invoice_data)
-        
+
         return {
             "filename": filename,
             "pdf_path": pdf_path,
@@ -243,6 +255,7 @@ class InvoiceParser:
             "total_amount": metadata["total_amount"],
             "currency": metadata["currency"],
             "line_items_count": metadata["line_items_count"],
+            "xl_output": xl_output,  # XL output for journal entry
             "data": invoice_data.model_dump(),
             "error": None,
             "timestamp": datetime.utcnow().isoformat()

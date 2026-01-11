@@ -50,6 +50,19 @@ class InvoiceData(BaseModel):
     already_recieved: Optional[float] = None
 
 
+class XLOutputRow(BaseModel):
+    """Excel output row for journal entry import"""
+    voucher_date: str  # ISO date from invoice
+    voucher_type_name: str  # Always "Journal"
+    voucher_number: int  # Sequential counter
+    buyer_supplier_address: str  # Vendor address
+    buyer_supplier_pincode: Optional[str] = None  # Extracted 6-digit pincode
+    ledger_name: str  # "ABC" placeholder for future LLM mapping
+    ledger_amount: float  # subtotal if GST exists, else total_amount
+    ledger_amount_dr_cr: str  # Always "Dr"
+    ledger_narration: str  # Concatenated line items
+
+
 class ProcessedInvoiceResult(BaseModel):
     filename: str
     pdf_path: str
@@ -60,6 +73,7 @@ class ProcessedInvoiceResult(BaseModel):
     total_amount: Optional[float] = None
     currency: Optional[str] = None
     line_items_count: Optional[int] = None
+    xl_output: Optional[List[XLOutputRow]] = None
     data: Optional[InvoiceData] = None
     error: Optional[str] = None
     timestamp: str

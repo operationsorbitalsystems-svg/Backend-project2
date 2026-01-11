@@ -25,6 +25,7 @@ class InMemorySessionManager:
             "files": [],
             "file_count": 0,
             "expires_at": (now + timedelta(seconds=SESSION_TIMEOUT_SECONDS)).isoformat(),
+            "voucher_counter": 0,  # Sequential counter for voucher numbers
             # COA fields
             "coa_filename": None,
             "coa_pdf_path": None,
@@ -157,6 +158,25 @@ class InMemorySessionManager:
 
         return self.update_session(batch_id, update_data)
 
+    def get_next_voucher_number(self, batch_id: str) -> int:
+        """
+        Get next voucher number and increment counter
+
+        Args:
+            batch_id: Session batch ID
+
+        Returns:
+            Next voucher number (1, 2, 3...)
+        """
+        if batch_id not in self.sessions:
+            return 1
+
+        if "voucher_counter" not in self.sessions[batch_id]:
+            self.sessions[batch_id]["voucher_counter"] = 0
+
+        self.sessions[batch_id]["voucher_counter"] += 1
+        return self.sessions[batch_id]["voucher_counter"]
+
 
 class RedisSessionManager:
     """Redis-based session storage for production"""
@@ -183,6 +203,7 @@ class RedisSessionManager:
             "files": json.dumps([]),
             "file_count": 0,
             "expires_at": (now + timedelta(seconds=SESSION_TIMEOUT_SECONDS)).isoformat(),
+            "voucher_counter": 0,  # Sequential counter for voucher numbers
             # COA fields
             "coa_filename": "",
             "coa_pdf_path": "",
@@ -343,6 +364,26 @@ class RedisSessionManager:
             update_data["coa_error"] = error
 
         return self.update_session(batch_id, update_data)
+
+    def get_next_voucher_number(self, batch_id: str) -> int:
+        """
+        Atomically increment and return next voucher number
+
+        Uses Redis HINCRBY for atomic increment to ensure thread-safety
+        in multi-worker environments.
+
+        Args:
+            batch_id: Session batch ID
+
+        Returns:
+            Next voucher number (1, 2, 3...)
+        """
+        key = f"session:{batch_id}"
+
+        # HINCRBY is atomic in Redis - increments and returns new value
+        new_value = self.redis_client.hincrby(key, "voucher_counter", 1)
+
+        return new_value  # Returns 1, 2, 3, etc.
 
 
 # Factory function to get the appropriate session manager

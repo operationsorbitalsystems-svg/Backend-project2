@@ -10,6 +10,7 @@ from models import TaskItem
 from services.session_manager import get_session_manager
 from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
+from services.xl_output_generator import XLOutputGenerator
 
 logger = logging.getLogger("task_queue")
 
@@ -178,13 +179,22 @@ class TaskQueueManager:
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
                     continue
 
+                # Generate XL Output
+                voucher_number = self.session_manager.get_next_voucher_number(task.batch_id)
+                xl_output_row = XLOutputGenerator.generate_xl_output_row(
+                    invoice_data,
+                    voucher_number
+                )
+                logger.info(f"Worker {worker_id} generated XL output for {task.filename} with voucher #{voucher_number}")
+
                 # Format and save result
                 json_path = self.file_handler.get_json_path(task.batch_id, task.filename)
                 result = self.invoice_parser.format_invoice_response(
                     task.filename,
                     task.pdf_path,
                     json_path,
-                    invoice_data
+                    invoice_data,
+                    xl_output=[xl_output_row.model_dump()]
                 )
 
                 # Save JSON result
