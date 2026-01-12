@@ -6,8 +6,9 @@ from typing import Dict, Any, Tuple, Optional, List
 from pathlib import Path
 from config import MISTRAL_API_KEY, mistral_semaphore
 from models import InvoiceData, InvoiceHeader, InvoiceLineItem
+from utils.logger import setup_logger
 
-logger = logging.getLogger("invoice_parser")
+logger = setup_logger()
 
 
 #global_semaphore_initialization

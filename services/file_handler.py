@@ -6,7 +6,9 @@ import logging
 from config import TEMP_STORAGE_PATH, MAX_FILES_PER_BATCH
 from utils.validators import validate_pdf_file, validate_file_size
 
-logger = logging.getLogger("invoice_parser")
+from utils.logger import setup_logger
+
+logger = setup_logger()
 
 
 class FileHandler:

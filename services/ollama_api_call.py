@@ -5,7 +5,9 @@ from typing import Tuple, Optional
 from pydantic import BaseModel, Field
 from config import OLLAMA_MODEL_NAME, OLLAMA_BASE_URL, ollama_semaphore
 
-logger = logging.getLogger("ollama_api_call")
+from utils.logger import setup_logger
+
+logger = setup_logger()
 
 # Initialize Ollama client with configurable base URL (singleton pattern)
 ollama_client = ollama.AsyncClient(host=OLLAMA_BASE_URL)

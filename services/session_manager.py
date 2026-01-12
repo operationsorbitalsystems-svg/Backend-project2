@@ -5,7 +5,9 @@ import json
 import logging
 from config import SESSION_TIMEOUT_SECONDS, REDIS_ENABLED, REDIS_URL
 
-logger = logging.getLogger("invoice_parser")
+from utils.logger import setup_logger
+
+logger = setup_logger()
 
 class InMemorySessionManager:
     """In-memory session storage for development/MVP"""

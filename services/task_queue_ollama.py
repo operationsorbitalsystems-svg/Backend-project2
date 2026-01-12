@@ -11,8 +11,11 @@ from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
 from services.ollama_api_call import call_ollama_for_ledger
 from utils.prompts import ledger_name_prompt, extract_expense_leaf_nodes
+import re
+from utils.logger import setup_logger
 
-logger = logging.getLogger("task_queue_ollama")
+logger = setup_logger()
+
 
 
 class OllamaTaskQueueManager:
@@ -123,9 +126,17 @@ class OllamaTaskQueueManager:
             if not coa_data:
                 logger.error(f"No COA data found for batch {batch_id}")
                 return None
+            
+
+            expense_pattern = re.compile(r'(?i)\bexpense(s)?\b')
 
             hierarchy = coa_data.get("hierarchy", {})
-            expenses = hierarchy.get("Expenses", {})
+
+            expenses = None
+            for key, value in hierarchy.items():
+                if isinstance(key, str) and expense_pattern.fullmatch(key.strip()):
+                    expenses = value
+                    break
 
             if not expenses:
                 logger.error(f"No Expenses section in COA for batch {batch_id}")

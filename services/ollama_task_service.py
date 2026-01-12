@@ -13,7 +13,9 @@ from uuid import uuid4
 
 from models import OllamaTask
 
-logger = logging.getLogger("ollama_task_service")
+from utils.logger import setup_logger
+
+logger = setup_logger()
 
 
 class OllamaTaskService:

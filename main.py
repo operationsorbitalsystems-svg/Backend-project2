@@ -19,7 +19,7 @@ from services.task_queue import get_task_queue_manager
 from services.task_queue_ollama import get_ollama_queue_manager
 from services.ollama_api_call import health_check_ollama
 from coa_parser import parse_coa
-
+import json
 # Setup logger
 logger = setup_logger(debug=DEBUG)
 
@@ -46,6 +46,51 @@ invoice_parser = InvoiceParser()
 task_queue = get_task_queue_manager()
 
 logger.info(f"Invoice Parser Backend Started - Debug: {DEBUG}, Log Level: {LOG_LEVEL}")
+
+# ============================================================================
+# UTIL FUNCTIONS
+# ============================================================================
+
+def coa_parsing(batch_id: str, coa_file_content, coa_file_name):
+    try:
+        # Save COA PDF
+        success, msg, coa_pdf_path = file_handler.save_coa_file(
+            batch_id, coa_file_name, coa_file_content
+        )
+
+        if not success:
+            raise HTTPException(status_code=400, detail=f"Failed to save COA file: {msg}")
+
+        # Get COA JSON path
+        coa_json_path = file_handler.get_coa_json_path(batch_id)
+
+        # Store COA paths in session
+        session_manager.set_coa_paths(batch_id, coa_file_name, coa_pdf_path, coa_json_path)
+
+        # Parse COA immediately (synchronous)
+        logger.info(f"Parsing COA file: {coa_pdf_path}")
+        coa_output = parse_coa(coa_pdf_path, debug=False)
+
+        # Save COA output as JSON
+        import json
+        with open(coa_json_path, 'w') as f:
+            json.dump(coa_output.model_dump(mode='json'), f, indent=2, default=str)
+
+        # Extract metadata for session
+        coa_metadata = {
+            "total_pages": coa_output.metadata.total_pages,
+            "total_groups": coa_output.metadata.total_groups,
+            "total_ledgers": coa_output.metadata.total_ledgers,
+            "levels_discovered": coa_output.metadata.levels_discovered
+        }
+
+        # Update COA status to "parsed"
+        session_manager.update_coa_status(batch_id, "parsed", coa_metadata=coa_metadata)
+        logger.info(f"COA parsed successfully for batch {batch_id}")
+    except Exception as e:
+        logger.error(f"Error processing COA file: {str(e)}")
+        session_manager.update_coa_status(batch_id, "failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to process COA file: {str(e)}")
 
 
 # ============================================================================
@@ -121,41 +166,9 @@ async def upload_files(batch_id: str, coa_file: UploadFile = File(...), files: L
         try:
             # Read COA file content
             coa_content = await coa_file.read()
-
-            # Save COA PDF
-            success, msg, coa_pdf_path = file_handler.save_coa_file(
-                batch_id, coa_file.filename, coa_content
-            )
-
-            if not success:
-                raise HTTPException(status_code=400, detail=f"Failed to save COA file: {msg}")
-
-            # Get COA JSON path
-            coa_json_path = file_handler.get_coa_json_path(batch_id)
-
-            # Store COA paths in session
-            session_manager.set_coa_paths(batch_id, coa_file.filename, coa_pdf_path, coa_json_path)
-
-            # Parse COA immediately (synchronous)
-            logger.info(f"Parsing COA file: {coa_pdf_path}")
-            coa_output = parse_coa(coa_pdf_path, debug=False)
-
-            # Save COA output as JSON
-            import json
-            with open(coa_json_path, 'w') as f:
-                json.dump(coa_output.model_dump(mode='json'), f, indent=2, default=str)
-
-            # Extract metadata for session
-            coa_metadata = {
-                "total_pages": coa_output.metadata.total_pages,
-                "total_groups": coa_output.metadata.total_groups,
-                "total_ledgers": coa_output.metadata.total_ledgers,
-                "levels_discovered": coa_output.metadata.levels_discovered
-            }
-
-            # Update COA status to "parsed"
-            session_manager.update_coa_status(batch_id, "parsed", coa_metadata=coa_metadata)
-            logger.info(f"COA parsed successfully for batch {batch_id}")
+            coa_filename = coa_file.filename
+            
+            coa_parsing(batch_id, coa_content, coa_filename)
 
         except HTTPException:
             raise

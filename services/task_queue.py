@@ -13,8 +13,9 @@ from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
 from services.ollama_task_service import OllamaTaskService
 from services.task_queue_ollama import get_ollama_queue_manager
+from utils.logger import setup_logger
 
-logger = logging.getLogger("task_queue")
+logger = setup_logger()
 
 
 class TaskQueueManager:
