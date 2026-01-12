@@ -1,5 +1,5 @@
-from pydantic import BaseModel, constr, field_validator
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, constr, field_validator, create_model, Field
+from typing import List, Optional, Dict, Any, Literal
 from datetime import datetime
 
 # === Session Models ===
@@ -171,3 +171,33 @@ class OllamaTask(BaseModel):
     ledger_narration: str  # Concatenated line items
     enqueued_at: str  # ISO timestamp
     metadata: Optional[Dict[str, Any]] = None  # For extensibility (task purpose, etc.)
+    
+    
+# === Pydantic model for Ollama ===
+
+class OllamaLedger(BaseModel):
+    ledger : str
+    
+
+def custom_ledger(leaf_node_list: List[str]):
+    """
+    Dynamically creates a Pydantic schema with ledger constrained to the provided list.
+    
+    Args:
+        leaf_node_list: List of valid ledger names
+    
+    Returns:
+        Pydantic model class with constrained ledger field
+    """
+    # Create a Literal type with the provided list
+    ledger_literal = Literal[tuple(leaf_node_list)]
+    
+    # Dynamically create the model
+    OllamaLedger = create_model(
+        'OllamaLedger',
+        ledger=(ledger_literal, Field(description="Selected ledger account"))
+    )
+    
+    return OllamaLedger
+
+

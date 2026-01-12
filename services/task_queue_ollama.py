@@ -1,7 +1,6 @@
 import asyncio
 import json
-import logging
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from uuid import uuid4
 
@@ -13,6 +12,7 @@ from services.ollama_api_call import call_ollama_for_ledger
 from utils.prompts import ledger_name_prompt, extract_expense_leaf_nodes
 import re
 from utils.logger import setup_logger
+from models import custom_ledger
 
 logger = setup_logger()
 
@@ -37,6 +37,14 @@ class OllamaTaskQueueManager:
 
         # In-memory cache for expense leaf nodes per batch
         self.expense_leaf_cache = {}  # {batch_id: [leaf_node_names]}
+        
+    
+    @staticmethod
+    def dynamic_ollama_pydantic(leaf_node_list: List[str]):
+        
+        
+        
+        pass
 
     async def enqueue_task(
         self,
@@ -202,7 +210,8 @@ class OllamaTaskQueueManager:
                 # Call Ollama with retry
                 success, ledger_name, confidence_score, error = await call_ollama_for_ledger(
                     system_prompt,
-                    user_prompt
+                    user_prompt,
+                    get_pydantic_schema= custom_ledger(expense_leaves)
                 )
 
                 if not success:
