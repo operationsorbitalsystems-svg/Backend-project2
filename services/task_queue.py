@@ -43,7 +43,7 @@ class TaskQueueManager:
 
         logger.info("TaskQueueManager initialized")
 
-    async def enqueue_file(self, batch_id: str, filename: str, pdf_path: str):
+    async def enqueue_file(self, batch_id: str, filename: str, pdf_path: str, vendor_name:str= ""):
         """
         Add a file to the task queue for processing.
 
@@ -56,6 +56,7 @@ class TaskQueueManager:
         task = TaskItem(
             task_id=str(uuid4()),
             batch_id=batch_id,
+            vendor_name=vendor_name,
             filename=filename,
             pdf_path=pdf_path,
             enqueued_at=datetime.utcnow().isoformat()
@@ -168,6 +169,7 @@ class TaskQueueManager:
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
                     continue
 
+
                 # Validate invoice data
                 is_valid, validation_error = self.invoice_parser.validate_invoice_data(invoice_data)
                 if not is_valid:
@@ -182,12 +184,16 @@ class TaskQueueManager:
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
                     continue
 
+                #Set Invoice name
+                task.vendor_name = invoice_data.header.vendor_name
+
                 # Generate XL Output
                 voucher_number = self.session_manager.get_next_voucher_number(task.batch_id)
                 xl_output_row = XLOutputGenerator.generate_xl_output_row(
                     invoice_data,
                     voucher_number
                 )
+                
                 logger.info(f"Worker {worker_id} generated XL output for {task.filename} with voucher #{voucher_number}")
 
                 # Format and save result
@@ -239,6 +245,7 @@ class TaskQueueManager:
                     ollama_queue_manager=ollama_queue,
                     batch_id=task.batch_id,
                     filename=task.filename,
+                    vendor_name=task.vendor_name,
                     invoice_number=invoice_data.header.invoice_number,
                     ledger_narration=xl_output_row.ledger_narration
                 )

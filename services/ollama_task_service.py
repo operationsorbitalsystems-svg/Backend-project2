@@ -32,6 +32,7 @@ class OllamaTaskService:
     async def enqueue_ledger_selection(
         ollama_queue_manager,
         batch_id: str,
+        vendor_name:str,
         filename: str,
         invoice_number: str,
         ledger_narration: str
@@ -56,6 +57,7 @@ class OllamaTaskService:
 
         # Enqueue task
         task_id = await ollama_queue_manager.enqueue_task(
+            vendor_name=vendor_name,
             batch_id=batch_id,
             filename=filename,
             invoice_number=invoice_number,

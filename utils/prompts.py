@@ -41,7 +41,7 @@ def extract_expense_leaf_nodes(coa_hierarchy: Dict[str, Any]) -> List[str]:
     return leaf_nodes
 
 
-def ledger_name_prompt(
+def ledger_name_prompt_dr(
     ledger_narration: str,
     expense_leaf_nodes: List[str]
 ) -> Tuple[str, str]:
@@ -82,6 +82,52 @@ Response format: Return ONLY the ledger name, nothing else."""
     user_prompt = f"""Invoice line items: {ledger_narration}
 
 Available expense ledgers:
+{ledgers_formatted}
+
+Selected ledger name:"""
+
+    return system_prompt, user_prompt
+
+
+
+def ledger_name_prompt_cr(
+    vendor_name: str,
+    invoice_description: str,
+    liability_leaf_nodes: List[str]
+) -> Tuple[str, str]:
+    """
+    Generate system and user prompts for identifying the correct Liability ledger.
+
+    Args:
+        vendor_name: The name of the vendor from the invoice.
+        invoice_description: Description of the services or goods provided.
+        liability_leaf_nodes: List of available liability ledger names (Creditors, Provisions, etc.)
+
+    Returns:
+        Tuple of (system_prompt, user_prompt)
+    """
+    # Format liability ledgers as a numbered list
+    ledgers_formatted = "\n".join([f"{i+1}. {ledger}" for i, ledger in enumerate(liability_leaf_nodes)])
+
+    system_prompt = """You are an accounting assistant specializing in Accounts Payable categorization for Indian businesses.
+
+Your task is to match a vendor or transaction to the correct Liability ledger from the Chart of Accounts (COA).
+
+Rules:
+1. Return ONLY the exact ledger name from the provided list (case-sensitive, exact match).
+2. Primary Check: If the Vendor Name matches a specific name in "Sundry Creditors" (e.g., "Beyond Codes", "LegaLogic Consulting LLP"), select that specific ledger.
+3. Reimbursements: If the invoice is a staff reimbursement, look for "Reimbursement Payable" or the specific employee's reimbursement ledger (e.g., "Aditya Wagh Reimbursement").
+4. Payroll/Human Resources: For salaries or stipends, use "Salary Payable" or "Stipend Payable".
+5. Statutory/Taxes: For tax-related liabilities, select the specific tax ledger (e.g., "TDS 194J", "ESIC Payable").
+6. Loans: If the transaction involves shareholder funds or debt, look under "Loans (Liability)".
+7. Edge Cases: If no specific vendor name exists, categorize under the most relevant broad liability header provided (e.g., "Other Payables").
+
+Response format: Return ONLY the ledger name, nothing else."""
+
+    user_prompt = f"""Vendor Name: {vendor_name}
+Invoice Description: {invoice_description}
+
+Available Liability Ledgers:
 {ledgers_formatted}
 
 Selected ledger name:"""

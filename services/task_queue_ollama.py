@@ -1,6 +1,6 @@
 import asyncio
 import json
-from typing import Optional, List
+from typing import Optional, List, Tuple
 from datetime import datetime
 from uuid import uuid4
 
@@ -9,7 +9,7 @@ from models import OllamaTask
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
 from services.ollama_api_call import call_ollama_for_ledger
-from utils.prompts import ledger_name_prompt, extract_expense_leaf_nodes
+from utils.prompts import ledger_name_prompt_dr, extract_expense_leaf_nodes, ledger_name_prompt_cr
 import re
 from utils.logger import setup_logger
 from models import custom_ledger
@@ -30,25 +30,21 @@ class OllamaTaskQueueManager:
     ACTIVE_BATCHES_KEY = "ollama_queue:active_batches"
     ROUND_ROBIN_INDEX_KEY = "ollama_queue:round_robin_index"
 
-    def __init__(self):
+    def __init__(self, ):
         self.redis = redis_client
         self.session_manager = get_session_manager()
         self.file_handler = FileHandler()
 
         # In-memory cache for expense leaf nodes per batch
-        self.expense_leaf_cache = {}  # {batch_id: [leaf_node_names]}
+        self.dr_ledger_name_cache = {}  # {batch_id: [leaf_node_names]}
+        self.cr_ledger_name_cache = {}
         
     
-    @staticmethod
-    def dynamic_ollama_pydantic(leaf_node_list: List[str]):
-        
-        
-        
-        pass
 
     async def enqueue_task(
         self,
         batch_id: str,
+        vendor_name: str,
         filename: str,
         invoice_number: str,
         ledger_narration: str,
@@ -63,6 +59,7 @@ class OllamaTaskQueueManager:
         task = OllamaTask(
             task_id=str(uuid4()),
             batch_id=batch_id,
+            vendor_name=vendor_name,
             filename=filename,
             invoice_number=invoice_number,
             ledger_narration=ledger_narration,
@@ -119,55 +116,81 @@ class OllamaTaskQueueManager:
             # Retry recursively
             return await self.get_next_task_round_robin()
 
-    def get_or_load_expense_leaves(self, batch_id: str) -> Optional[list]:
+    def get_or_load_expense_leaves(self, batch_id: str, expense_pattern_dr : re.compile, expense_pattern_cr: re.compile) -> Tuple[Optional[list], Optional[List]]:
         """
         Get expense leaf nodes from cache or load from COA file.
         Cache is in-memory per batch. On server restart, reloads on-demand.
         """
+        
         # Check cache first
-        if batch_id in self.expense_leaf_cache:
-            return self.expense_leaf_cache[batch_id]
+        if batch_id in self.cr_ledger_name_cache:
+            return self.cr_ledger_name_cache[batch_id]        
+        # Check cache first
+        if batch_id in self.dr_ledger_name_cache:
+            return self.dr_ledger_name_cache[batch_id]
 
         # Load from COA file
         try:
             coa_data = self.file_handler.read_coa_json(batch_id)
             if not coa_data:
                 logger.error(f"No COA data found for batch {batch_id}")
-                return None
-            
-
-            expense_pattern = re.compile(r'(?i)\bexpense(s)?\b')
+                return None, None
+        
 
             hierarchy = coa_data.get("hierarchy", {})
+            
 
-            expenses = None
+            expenses_cr = None
             for key, value in hierarchy.items():
-                if isinstance(key, str) and expense_pattern.fullmatch(key.strip()):
-                    expenses = value
+                if isinstance(key, str) and expense_pattern_cr.fullmatch(key.strip()):
+                    expenses_cr = value
                     break
 
-            if not expenses:
-                logger.error(f"No Expenses section in COA for batch {batch_id}")
-                return None
+            if not expenses_cr:
+                logger.error(f"No re section in COA for batch {batch_id}")
+                return None, None       
 
-            # Extract leaf nodes
-            leaf_nodes = extract_expense_leaf_nodes(expenses)
+            expenses_dr = None
+            for key, value in hierarchy.items():
+                if isinstance(key, str) and expense_pattern_dr.fullmatch(key.strip()):
+                    expenses_dr = value
+                    break
+
+            if not expenses_dr:
+                logger.error(f"No re section in COA for batch {batch_id}")
+                return None, None
+
+            leaf_nodes_cr = extract_expense_leaf_nodes(expenses_cr)
 
             # Cache in memory
-            self.expense_leaf_cache[batch_id] = leaf_nodes
+            self.cr_ledger_name_cache[batch_id] = leaf_nodes_cr
 
-            logger.info(f"📋 Loaded {len(leaf_nodes)} expense ledgers for batch {batch_id}")
-            return leaf_nodes
+            logger.info(f"📋 Loaded {len(leaf_nodes_dr)} : CR : expense ledgers for batch {batch_id}")
+
+
+            # Extract leaf nodes
+            leaf_nodes_dr = extract_expense_leaf_nodes(expenses_dr)
+
+            # Cache in memory
+            self.dr_ledger_name_cache[batch_id] = leaf_nodes_dr
+
+            logger.info(f"📋 Loaded {len(leaf_nodes_dr)} : DR : expense ledgers for batch {batch_id}")
+            return leaf_nodes_dr, leaf_nodes_cr
 
         except Exception as e:
             logger.error(f"Error loading expense leaves for batch {batch_id}: {str(e)}")
-            return None
+            return None, None
 
-    def clear_expense_cache(self, batch_id: str):
+    def clear_dr_ledger_name_cache(self, batch_id: str):
         """Clear expense cache for a completed batch"""
-        if batch_id in self.expense_leaf_cache:
-            del self.expense_leaf_cache[batch_id]
-            logger.info(f"🧹 Cleared expense cache for batch {batch_id}")
+        if batch_id in self.dr_ledger_name_cache:
+            del self.dr_ledger_name_cache[batch_id]
+            logger.info(f"🧹 Cleared dr cache for batch {batch_id}")
+            
+    def clear_cr_ledger_name_cache(self, batch_id: str):
+        if batch_id in self.cr_ledger_name_cache:
+            del self.cr_ledger_name_cache[batch_id]
+            logger.info(f"🧹 Cleared cr cache for batch {batch_id}")
 
     async def worker_loop(self, worker_id: int):
         """Worker loop for processing Ollama tasks"""
@@ -191,10 +214,14 @@ class OllamaTaskQueueManager:
                     "ledger_processing"
                 )
 
+                expense_pattern_dr = re.compile(r'(?i)\bexpense(s)?\b')
+                # Specifically targets 'Liability' or 'Liabilities' (case-insensitive)
+                expense_pattern_cr = re.compile(r'(?i)\bliabilit(y|ies)\b')
+                
                 # Get expense leaf nodes
-                expense_leaves = self.get_or_load_expense_leaves(task.batch_id)
+                expense_leaves_dr, expense_leaves_cr = self.get_or_load_expense_leaves(task.batch_id, expense_pattern_dr, expense_leaves_cr)
 
-                if not expense_leaves:
+                if not expense_leaves_dr or not expense_leaves_cr:
                     error_msg = "Failed to load expense ledgers from COA"
                     logger.error(f"❌ {error_msg} for {task.filename}")
                     self._handle_ollama_failure(task, error_msg)
@@ -202,17 +229,24 @@ class OllamaTaskQueueManager:
                     continue
 
                 # Generate prompts
-                system_prompt, user_prompt = ledger_name_prompt(
+                system_prompt_dr, user_prompt_dr = ledger_name_prompt_dr(
                     task.ledger_narration,
-                    expense_leaves
+                    expense_leaves_dr
+                )
+                
+                system_prompt_cr, user_prompt_cr = ledger_name_prompt_cr(
+                    task.vendor_name,
+                    task.ledger_narration,
+                    expense_leaves_cr
                 )
 
                 # Call Ollama with retry
                 success, ledger_name, confidence_score, error = await call_ollama_for_ledger(
-                    system_prompt,
-                    user_prompt,
-                    get_pydantic_schema= custom_ledger(expense_leaves)
+                    system_prompt_dr,
+                    user_prompt_dr,
+                    get_pydantic_schema= custom_ledger(expense_leaves_dr)
                 )
+                
 
                 if not success:
                     logger.error(f"❌ Ollama failed for {task.filename}: {error}")
@@ -328,7 +362,8 @@ class OllamaTaskQueueManager:
             })
 
             # Clear expense cache
-            self.clear_expense_cache(batch_id)
+            self.clear_dr_ledger_name_cache(batch_id)
+            self.clear_cr_ledger_name_cache(batch_id)
 
     async def start_workers(self, num_workers: int):
         """Start worker pool"""

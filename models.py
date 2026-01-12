@@ -131,6 +131,7 @@ class TaskItem(BaseModel):
     filename: str
     pdf_path: str
     enqueued_at: str  # ISO timestamp
+    vendor_name:str
 
 
 # === COA Models ===
@@ -165,6 +166,7 @@ class COAData(BaseModel):
 class OllamaTask(BaseModel):
     """Represents an Ollama ledger selection task"""
     task_id: str
+    vendor_name:str
     batch_id: str
     filename: str
     invoice_number: str
@@ -189,6 +191,9 @@ def custom_ledger(leaf_node_list: List[str]):
     Returns:
         Pydantic model class with constrained ledger field
     """
+    
+    leaf_node_list.append("Select AC")
+    
     # Create a Literal type with the provided list
     ledger_literal = Literal[tuple(leaf_node_list)]
     
