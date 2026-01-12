@@ -139,8 +139,9 @@ class XLOutputGenerator:
             voucher_number=voucher_number,
             buyer_supplier_address=invoice_data.header.vendor_address or "",
             buyer_supplier_pincode=pincode,
-            ledger_name="ABC",  # Placeholder for future Ollama LLM mapping
+            ledger_name="PENDING",  # Will be updated by Ollama worker
             ledger_amount=ledger_amount,
             ledger_amount_dr_cr="Dr",
-            ledger_narration=narration
+            ledger_narration=narration,
+            confidence_score=None  # Will be set by Ollama worker
         )

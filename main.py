@@ -16,6 +16,8 @@ from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
 from services.invoice_parser import InvoiceParser
 from services.task_queue import get_task_queue_manager
+from services.task_queue_ollama import get_ollama_queue_manager
+from services.ollama_api_call import health_check_ollama
 from coa_parser import parse_coa
 
 # Setup logger
@@ -468,12 +470,27 @@ async def startup_event():
     """Startup event - initialize services and start cleanup task"""
     logger.info("Application startup")
 
+    # Health check for Ollama service
+    ollama_healthy, ollama_error = await health_check_ollama()
+    if not ollama_healthy:
+        logger.error(f"⚠️ Ollama health check failed: {ollama_error}")
+        logger.warning("⚠️ Continuing without Ollama - ledger selection will fail!")
+
+    # Get queue managers
+    ollama_queue = get_ollama_queue_manager()
+
     # Recover crashed tasks from Redis
     await task_queue.recover_crashed_tasks()
+    await ollama_queue.recover_crashed_tasks()
 
-    # Start worker pool
+    # Start Mistral worker pool
     await task_queue.start_workers(num_workers=MAX_MISTRAL_CONCURRENT)
-    logger.info(f"✅ Started {MAX_MISTRAL_CONCURRENT} task queue workers")
+    logger.info(f"✅ Started {MAX_MISTRAL_CONCURRENT} Mistral task queue workers")
+
+    # Start Ollama worker pool
+    from config import MAX_OLLAMA_CONCURRENT_CALLS
+    await ollama_queue.start_workers(num_workers=MAX_OLLAMA_CONCURRENT_CALLS)
+    logger.info(f"✅ Started {MAX_OLLAMA_CONCURRENT_CALLS} Ollama task queue workers")
 
     # Start background cleanup task
     asyncio.create_task(cleanup_old_batches())

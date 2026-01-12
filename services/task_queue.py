@@ -11,6 +11,8 @@ from services.session_manager import get_session_manager
 from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
+from services.ollama_task_service import OllamaTaskService
+from services.task_queue_ollama import get_ollama_queue_manager
 
 logger = logging.getLogger("task_queue")
 
@@ -204,13 +206,6 @@ class TaskQueueManager:
                     result
                 )
 
-                # Update file status to completed
-                self.session_manager.update_file_status(
-                    task.batch_id,
-                    task.filename,
-                    "completed"
-                )
-
                 # Update session with results
                 session = self.session_manager.get_session(task.batch_id)
                 if session:
@@ -230,62 +225,40 @@ class TaskQueueManager:
                     processed_results.append(result)
                     self.session_manager.update_session(task.batch_id, {"processed_results": processed_results})
 
-                # Check if all files in batch are processed
-                session = self.session_manager.get_session(task.batch_id)
-                if session:
-                    # Get files - could be list or JSON string depending on storage backend
-                    files_raw = session.get("files", [])
+                # Update file status to ocr_complete (Mistral done, Ollama pending)
+                self.session_manager.update_file_status(
+                    task.batch_id,
+                    task.filename,
+                    "ocr_complete"
+                )
 
-                    # Parse if it's a JSON string (Redis case)
-                    if isinstance(files_raw, str):
-                        try:
-                            files = json.loads(files_raw)
-                        except (json.JSONDecodeError, TypeError):
-                            files = []
-                    else:
-                        files = files_raw if isinstance(files_raw, list) else []
+                # Enqueue Ollama task for ledger selection using centralized service
+                ollama_queue = get_ollama_queue_manager()
+                await OllamaTaskService.enqueue_ledger_selection(
+                    ollama_queue_manager=ollama_queue,
+                    batch_id=task.batch_id,
+                    filename=task.filename,
+                    invoice_number=invoice_data.header.invoice_number,
+                    ledger_narration=xl_output_row.ledger_narration
+                )
 
-                    all_processed = all(f["status"] in ["completed", "failed"] for f in files)
-                    if all_processed:
-                        logger.info(f"Batch {task.batch_id} processing completed")
-                        self.session_manager.update_session(task.batch_id, {
-                            "status": "completed",
-                            "completed_at": datetime.utcnow().isoformat()
-                        })
+                logger.info(f"✅ Mistral Worker {worker_id} completed for {task.filename}, Ollama task enqueued")
 
                 # Remove from processing set
                 await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
 
-                logger.info(f"Worker {worker_id} completed {task.filename} (batch: {task.batch_id})")
-
             except Exception as e:
-                logger.error(f"Worker {worker_id} error: {e}", exc_info=True)
-                # Try to mark task as failed if we have task context
-                if 'task' in locals() and task:
-                    try:
-                        self.session_manager.update_file_status(
-                            task.batch_id,
-                            task.filename,
-                            "failed",
-                            error=str(e)
-                        )
-                        await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-                    except Exception as cleanup_error:
-                        logger.error(f"Worker {worker_id} failed to cleanup after error: {cleanup_error}")
+                logger.error(f"Worker {worker_id} error: {str(e)}")
+                await asyncio.sleep(1)
 
     async def start_workers(self, num_workers: int):
-        """
-        Start N worker coroutines.
-
-        Args:
-            num_workers: Number of workers to start
-        """
-        logger.info(f"Starting {num_workers} workers")
+        """Start worker pool"""
+        logger.info(f"Starting {num_workers} Mistral workers")
 
         for worker_id in range(1, num_workers + 1):
             asyncio.create_task(self.worker_loop(worker_id))
 
-        logger.info(f"All {num_workers} workers started")
+        logger.info(f"✅ All {num_workers} Mistral workers started")
 
     async def recover_crashed_tasks(self):
         """

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, constr, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -14,13 +14,14 @@ class SessionCreateResponse(BaseModel):
 
 class FileStatus(BaseModel):
     filename: str
-    status: str  # "pending", "processing", "completed", "failed"
+    status: str  # "pending", "processing", "ocr_complete", "ledger_processing", "completed", "failed"
     processed_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     error: Optional[str] = None
 
 
 # === Invoice Data Models ===
+
 
 class InvoiceHeader(BaseModel):
     invoice_number: str
@@ -29,6 +30,16 @@ class InvoiceHeader(BaseModel):
     vendor_address: Optional[str] = None
     vendor_gstin: Optional[str] = None
     place_of_supply: Optional[str] = None
+    vendor_pin_code: Optional[str] = None
+
+    @field_validator("vendor_pin_code")
+    @classmethod
+    def validate_pincode(cls, v):
+        if v is None:
+            return v
+        if not (v.isdigit() and len(v) == 6):
+            raise ValueError("Pincode must be a 6-digit numeric string")
+        return v
 
 
 class InvoiceLineItem(BaseModel):
@@ -57,10 +68,11 @@ class XLOutputRow(BaseModel):
     voucher_number: int  # Sequential counter
     buyer_supplier_address: str  # Vendor address
     buyer_supplier_pincode: Optional[str] = None  # Extracted 6-digit pincode
-    ledger_name: str  # "ABC" placeholder for future LLM mapping
+    ledger_name: str  # Ledger name from COA (via Ollama)
     ledger_amount: float  # subtotal if GST exists, else total_amount
     ledger_amount_dr_cr: str  # Always "Dr"
     ledger_narration: str  # Concatenated line items
+    confidence_score: Optional[float] = None  # LLM confidence (0.0-1.0)
 
 
 class ProcessedInvoiceResult(BaseModel):
@@ -145,3 +157,17 @@ class COAData(BaseModel):
     metadata: Dict[str, Any]
     hierarchy: Dict[str, Any]
     flat_list: List[str]
+
+
+# === Ollama Taks Queue ====
+
+
+class OllamaTask(BaseModel):
+    """Represents an Ollama ledger selection task"""
+    task_id: str
+    batch_id: str
+    filename: str
+    invoice_number: str
+    ledger_narration: str  # Concatenated line items
+    enqueued_at: str  # ISO timestamp
+    metadata: Optional[Dict[str, Any]] = None  # For extensibility (task purpose, etc.)
