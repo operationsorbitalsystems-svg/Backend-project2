@@ -163,7 +163,7 @@ class RedisSessionManager:
                 
                 if status == "processing":
                     file_record["started_at"] = datetime.utcnow().isoformat()
-                elif status in ["completed", "failed"]:
+                elif status in ["completed", "failed", "success"]:
                     file_record["processed_at"] = datetime.utcnow().isoformat()
                 
                 if error:

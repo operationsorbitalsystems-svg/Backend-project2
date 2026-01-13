@@ -270,22 +270,6 @@ class TaskQueueManager:
                                     
                 custom_schema_expense = custom_ledger(expense_ledgers)
 
-#                 expense_system_prompt = """You are an accounting assistant. Select the most appropriate expense ledger from the Chart of Accounts (COA) based on the invoice line items.
-
-# Rules:
-# - Return ONLY the exact ledger name from the provided list
-# - If unsure, return "Suspended AC"
-# - Do not add explanations or extra text"""
-
-#                 expense_user_prompt = f"""Select the best expense ledger for this invoice:
-
-# Invoice line items: {narration}
-
-# Available expense ledgers:
-# {chr(10).join(expense_ledgers)}
-
-# Return only the ledger name."""
-
                 expense_ledgers.append(NOT_FOUND)
 
                 expense_system_prompt, expense_user_prompt = ledger_name_prompt_dr(
@@ -345,11 +329,11 @@ class TaskQueueManager:
                 # === STEP 5: Parse Expense Ledger (with fallback) ===
                 if isinstance(expense_response, Exception) or isinstance(expense_response, TimeoutError):
                     logger.error(f"Worker {worker_id} Ollama timeout/error for expense ledger: {task.filename}")
-                    expense_ledger_name = "Suspended AC"
+                    expense_ledger_name = NOT_FOUND
                     expense_confidence = 0.0
                 elif not expense_response.success:
                     logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
-                    expense_ledger_name = "Suspended AC"
+                    expense_ledger_name = NOT_FOUND
                     expense_confidence = 0.0
                 else:
                     expense_ledger_name, expense_confidence = self._parse_ledger_response(
@@ -357,7 +341,7 @@ class TaskQueueManager:
                         get_pydantic_schema=custom_schema_expense
                     )
                     if not expense_ledger_name:
-                        expense_ledger_name = "Suspended AC"
+                        expense_ledger_name = NOT_FOUND
                         expense_confidence = 0.0
 
                 logger.info(f"Worker {worker_id} Expense ledger: {expense_ledger_name} (confidence: {expense_confidence:.2f})")
@@ -365,11 +349,11 @@ class TaskQueueManager:
                 # === STEP 6: Parse Vendor Ledger (with fallback) ===
                 if isinstance(vendor_response, Exception) or isinstance(vendor_response, TimeoutError):
                     logger.error(f"Worker {worker_id} Ollama timeout/error for vendor ledger: {task.filename}")
-                    vendor_ledger_name = "Suspended AC"
+                    vendor_ledger_name = NOT_FOUND
                     vendor_confidence = 0.0
                 elif not vendor_response.success:
                     logger.error(f"Worker {worker_id} No Ledger name for Vendor through Ollama")
-                    vendor_ledger_name = "Suspended AC"
+                    vendor_ledger_name = NOT_FOUND
                     vendor_confidence = 0.0
                 else:
                     vendor_ledger_name, vendor_confidence = self._parse_ledger_response(
@@ -377,7 +361,7 @@ class TaskQueueManager:
                         get_pydantic_schema=custom_schema_liability
                     )
                     if not vendor_ledger_name:
-                        vendor_ledger_name = "Suspended AC"
+                        vendor_ledger_name = NOT_FOUND
                         vendor_confidence = 0.0
 
                 logger.info(f"Worker {worker_id} Vendor ledger: {vendor_ledger_name} (confidence: {vendor_confidence:.2f})")
@@ -410,7 +394,7 @@ class TaskQueueManager:
                     filename=task.filename,
                     pdf_path=task.pdf_path,
                     json_path=json_path,
-                    status="completed",
+                    status="success",
                     invoice_number=invoice_data.header.invoice_number,
                     vendor_name=invoice_data.header.vendor_name,
                     total_amount=invoice_data.total_amount,
@@ -442,7 +426,7 @@ class TaskQueueManager:
                 self.session_manager.update_file_status(
                     task.batch_id,
                     task.filename,
-                    "completed"
+                    "success"
                 )
 
                 logger.info(f"✅ Worker {worker_id} completed {task.filename}: {len(xl_rows)} XL rows generated")
@@ -468,113 +452,6 @@ class TaskQueueManager:
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
 
                 await asyncio.sleep(1)
-
-
-    # async def _load_expense_ledgers_from_coa(self, batch_id: str) -> List[str]:
-    #     """
-    #     Load expense leaf nodes from COA (cached per batch).
-
-    #     Args:
-    #         batch_id: Batch identifier
-
-    #     Returns:
-    #         List of expense ledger names
-    #     """
-    #     # Check cache first
-    #     if batch_id in self.expense_ledgers_cache:
-    #         return self.expense_ledgers_cache[batch_id]
-
-    #     # Load COA from session
-    #     session = self.session_manager.get_session(batch_id)
-    #     if not session or "coa_data" not in session:
-    #         logger.warning(f"COA not found for batch {batch_id}, returning fallback")
-    #         return ["Suspended AC"]
-
-    #     coa_data = session["coa_data"]
-
-    #     # Parse COA data if it's a string
-    #     if isinstance(coa_data, str):
-    #         try:
-    #             coa_data = json.loads(coa_data)
-    #         except json.JSONDecodeError:
-    #             logger.error(f"Failed to parse COA data for batch {batch_id}")
-    #             return ["Suspended AC"]
-
-    #     # Extract expense ledgers from flat_list
-    #     flat_list = coa_data.get("flat_list", [])
-
-    #     # Find expense ledgers (ledgers under "Expense" or "Expenses" groups)
-    #     expense_ledgers = [
-    #         ledger for ledger in flat_list
-    #         if "expense" in ledger.lower() or "cost" in ledger.lower()
-    #     ]
-
-    #     # If no expense ledgers found, use all leaf nodes as fallback
-    #     if not expense_ledgers:
-    #         expense_ledgers = flat_list[:50]  # Limit to first 50 to avoid token overflow
-
-    #     # Always include fallback
-    #     if "Suspended AC" not in expense_ledgers:
-    #         expense_ledgers.append("Suspended AC")
-
-    #     # Cache result
-    #     self.expense_ledgers_cache[batch_id] = expense_ledgers
-    #     logger.info(f"Loaded {len(expense_ledgers)} expense ledgers for batch {batch_id}")
-
-    #     return expense_ledgers
-
-    # async def _load_liability_ledgers_from_coa(self, batch_id: str) -> List[str]:
-    #     """
-    #     Load liability leaf nodes from COA (cached per batch).
-
-    #     Args:
-    #         batch_id: Batch identifier
-
-    #     Returns:
-    #         List of liability ledger names
-    #     """
-    #     # Check cache first
-    #     if batch_id in self.liability_ledgers_cache:
-    #         return self.liability_ledgers_cache[batch_id]
-
-    #     # Load COA from session
-    #     session = self.session_manager.get_session(batch_id)
-    #     if not session or "coa_data" not in session:
-    #         logger.warning(f"COA not found for batch {batch_id}, returning fallback")
-    #         return ["Suspended AC"]
-
-    #     coa_data = session["coa_data"]
-
-    #     # Parse COA data if it's a string
-    #     if isinstance(coa_data, str):
-    #         try:
-    #             coa_data = json.loads(coa_data)
-    #         except json.JSONDecodeError:
-    #             logger.error(f"Failed to parse COA data for batch {batch_id}")
-    #             return ["Suspended AC"]
-
-    #     # Extract liability ledgers from flat_list
-    #     flat_list = coa_data.get("flat_list", [])
-
-    #     # Find liability ledgers (ledgers under "Liability" or "Creditors" groups)
-    #     liability_ledgers = [
-    #         ledger for ledger in flat_list
-    #         if "liability" in ledger.lower() or "creditor" in ledger.lower() or "payable" in ledger.lower()
-    #     ]
-
-    #     # If no liability ledgers found, use all leaf nodes as fallback
-    #     if not liability_ledgers:
-    #         liability_ledgers = flat_list[:50]  # Limit to first 50 to avoid token overflow
-
-    #     # Always include fallback
-    #     if "Suspended AC" not in liability_ledgers:
-    #         liability_ledgers.append("Suspended AC")
-
-    #     # Cache result
-    #     self.liability_ledgers_cache[batch_id] = liability_ledgers
-    #     logger.info(f"Loaded {len(liability_ledgers)} liability ledgers for batch {batch_id}")
-
-    #     return liability_ledgers
 
     def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str], get_pydantic_schema: BaseModel = None) -> Tuple[str, float]:
         """
