@@ -16,7 +16,7 @@ from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
 from services.invoice_parser import InvoiceParser
 from services.task_queue import get_task_queue_manager
-from services.task_queue_ollama import get_ollama_queue_manager
+from services.ollama_queue import get_ollama_queue_manager
 from services.ollama_api_call import health_check_ollama
 from coa_parser import parse_coa
 import json
@@ -494,16 +494,16 @@ async def startup_event():
 
     # Recover crashed tasks from Redis
     await task_queue.recover_crashed_tasks()
-    await ollama_queue.recover_crashed_tasks()
 
-    # Start Mistral worker pool
+    # Start main invoice worker pool
     await task_queue.start_workers(num_workers=MAX_MISTRAL_CONCURRENT)
-    logger.info(f"✅ Started {MAX_MISTRAL_CONCURRENT} Mistral task queue workers")
+    logger.info(f"✅ Started {MAX_MISTRAL_CONCURRENT} invoice workers")
 
     # Start Ollama worker pool
     from config import MAX_OLLAMA_CONCURRENT_CALLS
-    await ollama_queue.start_workers(num_workers=MAX_OLLAMA_CONCURRENT_CALLS)
-    logger.info(f"✅ Started {MAX_OLLAMA_CONCURRENT_CALLS} Ollama task queue workers")
+    for _ in range(MAX_OLLAMA_CONCURRENT_CALLS):
+        asyncio.create_task(ollama_queue.worker_loop())
+    logger.info(f"✅ Started {MAX_OLLAMA_CONCURRENT_CALLS} Ollama workers")
 
     # Start background cleanup task
     asyncio.create_task(cleanup_old_batches())

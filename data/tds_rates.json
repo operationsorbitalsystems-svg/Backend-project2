@@ -1,0 +1,10 @@
+{
+  "_comment": "TDS Rate Table - Phase 2 Implementation",
+  "_structure": {
+    "section_code": "TDS section code (e.g., 194C, 194J)",
+    "nature_of_tds": "Description of TDS nature (used for Ollama matching)",
+    "threshold_amount": "Threshold amount for TDS applicability",
+    "tds_rate_percent": "TDS rate percentage"
+  },
+  "rates": []
+}

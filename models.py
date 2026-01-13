@@ -160,21 +160,27 @@ class COAData(BaseModel):
     flat_list: List[str]
 
 
-# === Ollama Taks Queue ====
+# === Generic Ollama Queue Models ====
 
 
-class OllamaTask(BaseModel):
-    """Represents an Ollama ledger selection task"""
+class OllamaRequest(BaseModel):
+    """Generic Ollama LLM request"""
     task_id: str
-    vendor_name:str
     batch_id: str
-    filename: str
-    invoice_number: str
-    ledger_narration: str  # Concatenated line items
-    enqueued_at: str  # ISO timestamp
-    metadata: Optional[Dict[str, Any]] = None  # For extensibility (task purpose, etc.)
-    
-    
+    system_prompt: str
+    user_prompt: str
+    enqueued_at: str
+    metadata: Optional[Dict[str, Any]] = None  # For tracking context
+
+
+class OllamaResponse(BaseModel):
+    """Generic Ollama LLM response"""
+    task_id: str
+    response_text: str
+    success: bool
+    error: Optional[str] = None
+
+
 # === Pydantic model for Ollama ===
 
 class OllamaLedger(BaseModel):

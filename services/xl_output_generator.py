@@ -102,46 +102,117 @@ class XLOutputGenerator:
         return "; ".join(descriptions)
 
     @staticmethod
-    def generate_xl_output_row(invoice_data: InvoiceData, voucher_number: int) -> XLOutputRow:
+    def generate_xl_output_rows(
+        invoice_data: InvoiceData,
+        expense_ledger_name: str,
+        vendor_ledger_name: str,
+        expense_confidence: float,
+        vendor_confidence: float,
+        voucher_number: int
+    ) -> List[XLOutputRow]:
         """
-        Generate complete XL_Output row from invoice data
+        Generate multiple XL output rows per invoice (Dr/Cr pairing + GST).
+
+        Returns 2-5+ rows depending on invoice structure:
+        - 1 Dr row for expense
+        - 0-3 Dr rows for GST (CGST/SGST/IGST)
+        - 1 Cr row for vendor
 
         Args:
             invoice_data: Parsed invoice data from Mistral OCR
+            expense_ledger_name: Expense ledger from Ollama (or "Suspended AC")
+            vendor_ledger_name: Vendor ledger from Ollama (or "Suspended AC")
+            expense_confidence: Confidence score for expense ledger (0.0-1.0)
+            vendor_confidence: Confidence score for vendor ledger (0.0-1.0)
             voucher_number: Sequential voucher number (1, 2, 3...)
 
         Returns:
-            XLOutputRow with all fields populated
-
-        Field Mapping:
-        - voucher_date: invoice_date from header
-        - voucher_type_name: Always "Journal"
-        - voucher_number: Sequential counter
-        - buyer_supplier_address: vendor_address from header
-        - buyer_supplier_pincode: Extracted from vendor_address
-        - ledger_name: "ABC" (placeholder for future LLM mapping)
-        - ledger_amount: subtotal if GST exists, else total_amount
-        - ledger_amount_dr_cr: Always "Dr"
-        - ledger_narration: Concatenated line item descriptions
+            List of XLOutputRow objects
         """
-        # Extract pincode from vendor address
-        pincode = XLOutputGenerator.extract_pincode(invoice_data.header.vendor_address)
+        rows = []
 
-        # Calculate ledger amount
-        ledger_amount = XLOutputGenerator.calculate_ledger_amount(invoice_data)
-
-        # Concatenate line item descriptions for narration
+        # Common fields for all rows
+        voucher_date = invoice_data.header.invoice_date
+        vendor_address = invoice_data.header.vendor_address or ""
+        pincode = XLOutputGenerator.extract_pincode(vendor_address)
         narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
 
-        return XLOutputRow(
-            voucher_date=invoice_data.header.invoice_date,
+        # Step 1: Dr entry for expense
+        has_gst = XLOutputGenerator.detect_has_gst(invoice_data)
+        ledger_amount = invoice_data.subtotal if (has_gst and invoice_data.subtotal) else invoice_data.total_amount
+
+        rows.append(XLOutputRow(
+            voucher_date=voucher_date,
             voucher_type_name="Journal",
             voucher_number=voucher_number,
-            buyer_supplier_address=invoice_data.header.vendor_address or "",
+            buyer_supplier_address=vendor_address,
             buyer_supplier_pincode=pincode,
-            ledger_name="PENDING",  # Will be updated by Ollama worker
+            ledger_name=expense_ledger_name,  # From Ollama
             ledger_amount=ledger_amount,
             ledger_amount_dr_cr="Dr",
             ledger_narration=narration,
-            confidence_score=None  # Will be set by Ollama worker
-        )
+            confidence_score=expense_confidence
+        ))
+
+        # Step 2: Dr entries for GST (if applicable) - PROGRAMMATIC
+        if invoice_data.cgst_tax_amount and invoice_data.cgst_tax_amount > 0:
+            rows.append(XLOutputRow(
+                voucher_date=voucher_date,
+                voucher_type_name="Journal",
+                voucher_number=voucher_number,
+                buyer_supplier_address=vendor_address,
+                buyer_supplier_pincode=pincode,
+                ledger_name="CGST",  # Programmatic for now
+                ledger_amount=invoice_data.cgst_tax_amount,
+                ledger_amount_dr_cr="Dr",
+                ledger_narration=narration,
+                confidence_score=1.0  # Programmatic = always confident
+            ))
+
+        if invoice_data.sgst_tax_amount and invoice_data.sgst_tax_amount > 0:
+            rows.append(XLOutputRow(
+                voucher_date=voucher_date,
+                voucher_type_name="Journal",
+                voucher_number=voucher_number,
+                buyer_supplier_address=vendor_address,
+                buyer_supplier_pincode=pincode,
+                ledger_name="SGST",  # Programmatic for now
+                ledger_amount=invoice_data.sgst_tax_amount,
+                ledger_amount_dr_cr="Dr",
+                ledger_narration=narration,
+                confidence_score=1.0
+            ))
+
+        if invoice_data.igst_tax_amount and invoice_data.igst_tax_amount > 0:
+            rows.append(XLOutputRow(
+                voucher_date=voucher_date,
+                voucher_type_name="Journal",
+                voucher_number=voucher_number,
+                buyer_supplier_address=vendor_address,
+                buyer_supplier_pincode=pincode,
+                ledger_name="IGST",  # Programmatic for now
+                ledger_amount=invoice_data.igst_tax_amount,
+                ledger_amount_dr_cr="Dr",
+                ledger_narration=narration,
+                confidence_score=1.0
+            ))
+
+        # Step 3: Cr entry for vendor/liability
+        rows.append(XLOutputRow(
+            voucher_date=voucher_date,
+            voucher_type_name="Journal",
+            voucher_number=voucher_number,
+            buyer_supplier_address=vendor_address,
+            buyer_supplier_pincode=pincode,
+            ledger_name=vendor_ledger_name,  # From Ollama
+            ledger_amount=invoice_data.total_amount,  # Total including GST
+            ledger_amount_dr_cr="Cr",
+            ledger_narration=f"{invoice_data.header.invoice_number} - {invoice_data.header.vendor_name}",
+            confidence_score=vendor_confidence
+        ))
+
+        # Step 4: TDS entries placeholder (Phase 2)
+        # tds_rows = add_tds_entries(invoice_data, narration, None, voucher_number)
+        # rows.extend(tds_rows)
+
+        return rows
