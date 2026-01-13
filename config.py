@@ -14,6 +14,7 @@ load_dotenv()
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
+MAX_MAIN_WORKERS = int(os.getenv("MAX_MAIN_WORKERS", "100"))
 MAX_MISTRAL_CONCURRENT = int(os.getenv("MAX_MISTRAL_CONCURRENT", "5"))
 MAX_OLLAMA_CONCURRENT_CALLS = int(os.getenv("MAX_OLLAMA_CONCURRENT_CALLS", "3"))
 

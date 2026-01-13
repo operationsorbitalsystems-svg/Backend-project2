@@ -5,8 +5,9 @@ from typing import Optional, List, Tuple, Dict
 from datetime import datetime
 from uuid import uuid4
 from pydantic import BaseModel
+import aiofiles
 from config import redis_client, MAX_MISTRAL_CONCURRENT, NOT_FOUND
-from models import TaskItem, ProcessedInvoiceResult, custom_ledger
+from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData
 from services.session_manager import get_session_manager
 from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
@@ -29,15 +30,16 @@ class TaskQueueManager:
     in round-robin fashion, preventing any single user from monopolizing workers.
     """
 
-    def __init__(self, redis_client):
+    def __init__(self, redis_client, mistral_queue, ollama_queue=None, session_manager=None, file_handler=None):
         if redis_client is None:
             raise ValueError("Redis client is required for task queue. Set REDIS_ENABLED=true")
 
         self.redis = redis_client
-        self.session_manager = get_session_manager()
+        self.mistral_queue = mistral_queue  # NEW: Mistral task queue
+        self.session_manager = session_manager if session_manager is not None else get_session_manager()
         self.invoice_parser = InvoiceParser()
-        self.file_handler = FileHandler()
-        self.ollama_queue = get_ollama_queue_manager()
+        self.file_handler = file_handler if file_handler is not None else FileHandler()
+        self.ollama_queue = ollama_queue if ollama_queue is not None else get_ollama_queue_manager()
 
         # Redis key patterns
         self.PENDING_QUEUE_PREFIX = "queue:pending:"
@@ -205,36 +207,62 @@ class TaskQueueManager:
                     "processing"
                 )
 
-                # === STEP 1: Mistral OCR ===
-                success, invoice_data, error = await self.invoice_parser.parse_invoice(task.pdf_path)
+                # === STEP 1: Enqueue to Mistral Queue (NON-BLOCKING) ===
+                mistral_task_id = await self.mistral_queue.enqueue_request(
+                    batch_id=task.batch_id,
+                    filename=task.filename,
+                    pdf_path=task.pdf_path
+                )
 
-                if not success or not invoice_data:
-                    logger.error(f"Worker {worker_id} Mistral OCR failed for {task.filename}: {error}")
-                    self.session_manager.update_file_status(
-                        task.batch_id,
-                        task.filename,
-                        "failed",               
-                        error=f"Mistral OCR failed: {error}"
+                # === STEP 2: Wait for Mistral Result (BLOCKING) ===
+                try:
+                    mistral_response = await self.mistral_queue.wait_for_response(
+                        task_id=mistral_task_id,
+                        timeout=120  # 2 minutes
                     )
-                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-                    continue
-
-                # Validate invoice data
-                is_valid, validation_error = self.invoice_parser.validate_invoice_data(invoice_data)
-                if not is_valid:
-                    logger.error(f"Worker {worker_id} validation failed for {task.filename}: {validation_error}")
+                except TimeoutError:
+                    logger.error(f"Worker {worker_id} Mistral OCR timeout for {task.filename}")
                     self.session_manager.update_file_status(
                         task.batch_id,
                         task.filename,
                         "failed",
-                        error=validation_error
+                        error="Mistral OCR timeout"
+                    )
+                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
+                    continue
+
+                if not mistral_response.success:
+                    logger.error(f"Worker {worker_id} Mistral OCR failed for {task.filename}: {mistral_response.error_message}")
+                    self.session_manager.update_file_status(
+                        task.batch_id,
+                        task.filename,
+                        "failed",
+                        error=f"Mistral OCR failed: {mistral_response.error_message}"
+                    )
+                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
+                    continue
+
+                # Load InvoiceData from JSON file
+                json_path = mistral_response.json_path
+                try:
+                    async with aiofiles.open(json_path, 'r') as f:
+                        json_content = await f.read()
+                    invoice_dict = json.loads(json_content)
+                    invoice_data = InvoiceData.model_validate(invoice_dict)
+                except Exception as e:
+                    logger.error(f"Worker {worker_id} failed to load invoice data from {json_path}: {e}")
+                    self.session_manager.update_file_status(
+                        task.batch_id,
+                        task.filename,
+                        "failed",
+                        error=f"Failed to load invoice data: {e}"
                     )
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
                     continue
 
                 logger.info(f"Worker {worker_id} Mistral OCR completed for {task.filename}")
 
-                # === STEP 2a: Ollama - Expense Ledger Selection ===
+                # === STEP 2a: Prepare Expense Ollama Request ===
                 # expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
                 expense_pattern = re.compile(r'(?i)\bexpense(s)?\b')
                 expense_ledgers = self.get_or_load_expense_leaves(task.batch_id,  expense_pattern)
@@ -266,6 +294,21 @@ class TaskQueueManager:
                     
                 )
 
+                # === STEP 2b: Prepare Vendor Ollama Request ===
+                liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
+                liability_ledgers = self.get_or_load_expense_leaves(task.batch_id, liability_pattern)
+                vendor_name = invoice_data.header.vendor_name
+
+                custom_schema_liability = custom_ledger(liability_ledgers)
+                liability_ledgers.append(NOT_FOUND)
+
+                vendor_system_prompt, vendor_user_prompt = ledger_name_prompt_cr(
+                    vendor_name=vendor_name,
+                    invoice_description=narration,
+                    liability_leaf_nodes=liability_ledgers
+                )
+
+                # === STEP 3: Enqueue BOTH Ollama Tasks (NON-BLOCKING) ===
                 expense_task_id = await self.ollama_queue.enqueue_request(
                     batch_id=task.batch_id,
                     system_prompt=expense_system_prompt,
@@ -275,58 +318,6 @@ class TaskQueueManager:
                         "filename": task.filename,
                         "pydantic_json_schema": custom_schema_expense.model_json_schema()
                     }
-                )
-
-                try:
-                    expense_response = await self.ollama_queue.wait_for_response(expense_task_id, timeout=60)
-                    expense_ledger_name, expense_confidence = self._parse_ledger_response(
-                        expense_response.response_text, expense_ledgers,
-                        get_pydantic_schema=custom_schema_expense
-                    )
-                except TimeoutError:
-                    logger.error(f"Worker {worker_id} Ollama timeout for expense ledger: {task.filename}")
-                    expense_ledger_name = "Suspended AC"
-                    expense_confidence = 0.0
-
-                if not expense_ledger_name or not expense_response.success:
-                    logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
-                    expense_ledger_name = "Suspended AC"
-                    expense_confidence = 0.0
-
-                logger.info(f"Worker {worker_id} Expense ledger: {expense_ledger_name} (confidence: {expense_confidence:.2f})")
-
-                # === STEP 2b: Ollama - Vendor Ledger Selection ===
-                # liability_ledgers = await self._load_liability_ledgers_from_coa(task.batch_id)
-                liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
-                liability_ledgers = self.get_or_load_expense_leaves(task.batch_id, liability_pattern)
-                vendor_name = invoice_data.header.vendor_name
-
-                custom_schema_liability = custom_ledger(liability_ledgers)
-
-#                 vendor_system_prompt = """You are an accounting assistant. Select the most appropriate liability/vendor ledger from the Chart of Accounts (COA) based on the vendor name.
-
-# Rules:
-# - Return ONLY the exact ledger name from the provided list
-# - Match the vendor name to the closest creditor/liability ledger
-# - If unsure, return "Suspended AC"
-# - Do not add explanations or extra text"""
-
-#                 vendor_user_prompt = f"""Select the best liability ledger for this vendor:
-
-# Vendor name: {vendor_name}
-
-# Available liability ledgers:
-# {chr(10).join(liability_ledgers)}
-
-# Return only the ledger name."""
-
-                liability_ledgers.append(NOT_FOUND)
-
-                vendor_system_prompt, vendor_user_prompt = ledger_name_prompt_cr(
-                    vendor_name=vendor_name,
-                    invoice_description=narration,
-                    liability_leaf_nodes=liability_ledgers
-                    
                 )
 
                 vendor_task_id = await self.ollama_queue.enqueue_request(
@@ -340,25 +331,58 @@ class TaskQueueManager:
                     }
                 )
 
-                try:
-                    vendor_response = await self.ollama_queue.wait_for_response(vendor_task_id, timeout=60)
+                # === STEP 4: Wait for BOTH Ollama Results in Parallel ===
+                # Use gather with return_exceptions=True to handle individual failures
+                results = await asyncio.gather(
+                    self.ollama_queue.wait_for_response(expense_task_id, timeout=60),
+                    self.ollama_queue.wait_for_response(vendor_task_id, timeout=60),
+                    return_exceptions=True
+                )
+
+                expense_response = results[0]
+                vendor_response = results[1]
+
+                # === STEP 5: Parse Expense Ledger (with fallback) ===
+                if isinstance(expense_response, Exception) or isinstance(expense_response, TimeoutError):
+                    logger.error(f"Worker {worker_id} Ollama timeout/error for expense ledger: {task.filename}")
+                    expense_ledger_name = "Suspended AC"
+                    expense_confidence = 0.0
+                elif not expense_response.success:
+                    logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
+                    expense_ledger_name = "Suspended AC"
+                    expense_confidence = 0.0
+                else:
+                    expense_ledger_name, expense_confidence = self._parse_ledger_response(
+                        expense_response.response_text, expense_ledgers,
+                        get_pydantic_schema=custom_schema_expense
+                    )
+                    if not expense_ledger_name:
+                        expense_ledger_name = "Suspended AC"
+                        expense_confidence = 0.0
+
+                logger.info(f"Worker {worker_id} Expense ledger: {expense_ledger_name} (confidence: {expense_confidence:.2f})")
+
+                # === STEP 6: Parse Vendor Ledger (with fallback) ===
+                if isinstance(vendor_response, Exception) or isinstance(vendor_response, TimeoutError):
+                    logger.error(f"Worker {worker_id} Ollama timeout/error for vendor ledger: {task.filename}")
+                    vendor_ledger_name = "Suspended AC"
+                    vendor_confidence = 0.0
+                elif not vendor_response.success:
+                    logger.error(f"Worker {worker_id} No Ledger name for Vendor through Ollama")
+                    vendor_ledger_name = "Suspended AC"
+                    vendor_confidence = 0.0
+                else:
                     vendor_ledger_name, vendor_confidence = self._parse_ledger_response(
                         vendor_response.response_text, liability_ledgers,
                         get_pydantic_schema=custom_schema_liability
                     )
-                except TimeoutError:
-                    logger.error(f"Worker {worker_id} Ollama timeout for vendor ledger: {task.filename}")
-                    vendor_ledger_name = "Suspended AC"
-                    vendor_confidence = 0.0
-
-                if not vendor_ledger_name or not vendor_response.success:
-                    logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
-                    vendor_ledger_name = "Suspended AC"
-                    vendor_confidence = 0.0
+                    if not vendor_ledger_name:
+                        vendor_ledger_name = "Suspended AC"
+                        vendor_confidence = 0.0
 
                 logger.info(f"Worker {worker_id} Vendor ledger: {vendor_ledger_name} (confidence: {vendor_confidence:.2f})")
 
-                # === STEP 3: Generate Multi-Row XL Output ===
+                # === STEP 7: Generate Multi-Row XL Output ===
                 voucher_number = await self._get_next_voucher_number(task.batch_id)
 
                 xl_rows = XLOutputGenerator.generate_xl_output_rows(
@@ -372,7 +396,7 @@ class TaskQueueManager:
 
                 logger.info(f"Worker {worker_id} generated {len(xl_rows)} XL rows for {task.filename} with voucher #{voucher_number}")
 
-                # === STEP 4: Save Results ===
+                # === STEP 8: Save Results ===
                 # Save invoice JSON
                 json_path = self.file_handler.get_json_path(task.batch_id, task.filename)
                 success, saved_json_path = self.file_handler.save_json_result(
@@ -618,14 +642,14 @@ class TaskQueueManager:
 
         return voucher_number
 
-    async def start_workers(self, num_workers: int):
+    async def start_workers(self, num_workers: int = 100):
         """Start worker pool"""
-        logger.info(f"Starting {num_workers} invoice workers")
+        logger.info(f"Starting {num_workers} main task queue workers")
 
         for worker_id in range(1, num_workers + 1):
             asyncio.create_task(self.worker_loop(worker_id))
 
-        logger.info(f"✅ All {num_workers} invoice workers started")
+        logger.info(f"✅ All {num_workers} main task queue workers started")
 
     async def recover_crashed_tasks(self):
         """

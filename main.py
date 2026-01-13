@@ -5,7 +5,7 @@ from typing import List
 from datetime import datetime
 import logging
 
-from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT
+from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT, MAX_MAIN_WORKERS, redis_client
 from utils.logger import setup_logger
 from models import (
     SessionCreateResponse, BatchStatusResponse, UploadResponse,
@@ -15,7 +15,8 @@ from models import (
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
 from services.invoice_parser import InvoiceParser
-from services.task_queue import get_task_queue_manager
+from services.task_queue import TaskQueueManager
+from services.mistral_queue import MistralQueueManager
 from services.ollama_queue import get_ollama_queue_manager
 from services.ollama_api_call import health_check_ollama
 from coa_parser import parse_coa
@@ -43,7 +44,25 @@ app.add_middleware(
 session_manager = get_session_manager()
 file_handler = FileHandler()
 invoice_parser = InvoiceParser()
-task_queue = get_task_queue_manager()
+
+# Initialize Mistral queue
+mistral_queue = MistralQueueManager(
+    redis_client=redis_client,
+    invoice_parser=invoice_parser,
+    file_handler=file_handler
+)
+
+# Initialize Ollama queue
+ollama_queue = get_ollama_queue_manager()
+
+# Initialize main task queue
+task_queue = TaskQueueManager(
+    redis_client=redis_client,
+    mistral_queue=mistral_queue,
+    ollama_queue=ollama_queue,
+    session_manager=session_manager,
+    file_handler=file_handler
+)
 
 logger.info(f"Invoice Parser Backend Started - Debug: {DEBUG}, Log Level: {LOG_LEVEL}")
 
@@ -481,7 +500,7 @@ async def cleanup_old_batches():
 @app.on_event("startup")
 async def startup_event():
     """Startup event - initialize services and start cleanup task"""
-    logger.info("Application startup")
+    logger.info("Application startup...")
 
     # Health check for Ollama service
     ollama_healthy, ollama_error = await health_check_ollama()
@@ -489,19 +508,22 @@ async def startup_event():
         logger.error(f"⚠️ Ollama health check failed: {ollama_error}")
         logger.warning("⚠️ Continuing without Ollama - ledger selection will fail!")
 
-    # Get queue managers
-    ollama_queue = get_ollama_queue_manager()
-
-    # Recover crashed tasks from Redis
+    # Recover crashed tasks from all queues
     await task_queue.recover_crashed_tasks()
+    await mistral_queue.recover_crashed_tasks()
+    logger.info("✅ Recovered crashed tasks from all queues")
 
-    # Start main invoice worker pool
-    await task_queue.start_workers(num_workers=MAX_MISTRAL_CONCURRENT)
-    logger.info(f"✅ Started {MAX_MISTRAL_CONCURRENT} invoice workers")
+    # Start Mistral worker pool
+    await mistral_queue.start_workers(num_workers=MAX_MISTRAL_CONCURRENT)
+    logger.info(f"✅ Started {MAX_MISTRAL_CONCURRENT} Mistral OCR workers")
+
+    # Start main task queue worker pool
+    await task_queue.start_workers(num_workers=MAX_MAIN_WORKERS)
+    logger.info(f"✅ Started {MAX_MAIN_WORKERS} main task queue workers")
 
     # Start Ollama worker pool
     from config import MAX_OLLAMA_CONCURRENT_CALLS
-    for _ in range(MAX_OLLAMA_CONCURRENT_CALLS):
+    for i in range(MAX_OLLAMA_CONCURRENT_CALLS):
         asyncio.create_task(ollama_queue.worker_loop())
     logger.info(f"✅ Started {MAX_OLLAMA_CONCURRENT_CALLS} Ollama workers")
 
@@ -509,11 +531,19 @@ async def startup_event():
     asyncio.create_task(cleanup_old_batches())
     logger.info("🧹 Background cleanup task started (runs every 1 hour)")
 
+    logger.info("Application startup complete")
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Shutdown event - cleanup"""
-    logger.info("Application shutdown")
+    logger.info("Application shutting down...")
+
+    # Stop Mistral workers
+    await mistral_queue.stop_workers()
+    logger.info("✅ Mistral workers stopped")
+
+    logger.info("Application shutdown complete")
 
 
 # ============================================================================

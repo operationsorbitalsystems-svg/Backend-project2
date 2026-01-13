@@ -216,3 +216,20 @@ def custom_ledger(leaf_node_list: List[str]):
         raise e
 
 
+# === Mistral Queue Models ===
+
+class MistralRequest(BaseModel):
+    task_id: str           # UUID
+    batch_id: str
+    filename: str
+    pdf_path: str
+    enqueued_at: str       # ISO timestamp
+
+class MistralResponse(BaseModel):
+    task_id: str
+    batch_id: str
+    success: bool
+    json_path: Optional[str] = None        # Path to saved JSON file (e.g., /tmp/invoice_uploads/batch-123/invoice.json)
+    error_message: Optional[str] = None
+    processed_at: str
+
