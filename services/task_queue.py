@@ -16,7 +16,7 @@ from services.ollama_queue import get_ollama_queue_manager
 from utils.logger import setup_logger
 from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_expense_leaf_nodes                                  
 import re
-
+from utils.coa_tree_traversal import find_matching_non_leaf_node, extract_leaf_nodes
 
 logger = setup_logger()
 
@@ -174,6 +174,50 @@ class TaskQueueManager:
         except Exception as e:
             logger.info(f"Couldnt extract because e")
             raise e
+        
+    def get_sundry_creditor_ledgers(self, batch_id: str) -> Optional[list]:
+        try:
+            coa_data = self.file_handler.read_coa_json(batch_id)
+            if not coa_data:
+                logger.error(f"No COA data found for batch {batch_id}")
+                return None
+
+            liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
+            
+            hierarchy = coa_data.get("hierarchy", {})
+
+            liabilities = None
+            for key, value in hierarchy.items():
+                if isinstance(key, str) and liability_pattern.fullmatch(key.strip()):
+                    liabilities = value
+                    break
+
+            if not isinstance(liabilities, dict):
+                logger.error(f"No Liabilities section in COA for batch {batch_id}")
+                return None
+
+            # Match: Sundry Creditors, Creditors, Creditor, etc.
+            creditor_pattern = re.compile(r'(?i)\bcreditor(s)?\b')
+
+            match = find_matching_non_leaf_node(liabilities, creditor_pattern)
+            if not match:
+                logger.error("No Sundry Creditors-like node found under Liabilities")
+                return None
+
+            creditor_key, creditor_tree = match
+            logger.info(f"✅ Found creditor node: {creditor_key}")
+
+            leaf_nodes = extract_leaf_nodes(creditor_tree)
+
+            logger.info(
+                f"📋 Loaded {len(leaf_nodes)} creditor ledgers from '{creditor_key}'"
+            )
+            return leaf_nodes
+
+        except Exception as e:
+            logger.exception("Failed to extract Sundry Creditors ledgers")
+            raise e
+
 
     async def worker_loop(self, worker_id: int):
         """
@@ -279,8 +323,9 @@ class TaskQueueManager:
                 )
 
                 # === STEP 2b: Prepare Vendor Ollama Request ===
-                liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
-                liability_ledgers = self.get_or_load_expense_leaves(task.batch_id, liability_pattern)
+                # liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
+                # liability_ledgers = self.get_or_load_expense_leaves(task.batch_id, liability_pattern)
+                liability_ledgers = self.get_sundry_creditor_ledgers(task.batch_id)
                 vendor_name = invoice_data.header.vendor_name
 
                 custom_schema_liability = custom_ledger(liability_ledgers)
