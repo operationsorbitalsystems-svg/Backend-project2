@@ -313,8 +313,10 @@ class TaskQueueManager:
                 narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
                                     
                 custom_schema_expense = custom_ledger(expense_ledgers)
+                
+                expense_ledgers = set(expense_ledgers)
 
-                expense_ledgers.append(NOT_FOUND)
+                expense_ledgers.add(NOT_FOUND)
 
                 expense_system_prompt, expense_user_prompt = ledger_name_prompt_dr(
                     ledger_narration= narration,
@@ -329,13 +331,18 @@ class TaskQueueManager:
                 vendor_name = invoice_data.header.vendor_name
 
                 custom_schema_liability = custom_ledger(liability_ledgers)
-                liability_ledgers.append(NOT_FOUND)
+                
+                liability_ledgers = set(liability_ledgers)
+                
+                liability_ledgers.add(NOT_FOUND)
 
                 vendor_system_prompt, vendor_user_prompt = ledger_name_prompt_cr(
                     vendor_name=vendor_name,
                     invoice_description=narration,
                     liability_leaf_nodes=liability_ledgers
                 )
+                
+                logger.info(f"Worker {worker_id} Liabilities Array is : {liability_ledgers}")
 
                 # === STEP 3: Enqueue BOTH Ollama Tasks (NON-BLOCKING) ===
                 expense_task_id = await self.ollama_queue.enqueue_request(

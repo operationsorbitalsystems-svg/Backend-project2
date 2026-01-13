@@ -46,50 +46,64 @@ def ledger_name_prompt_dr(
     ledger_narration: str,
     expense_leaf_nodes: List[str]
 ) -> Tuple[str, str]:
-
+    """
+    Structured prompt for matching invoice line items to Expense Ledgers.
+    """
     ledgers_formatted = "\n".join(
-        [f"{i+1}. {ledger}" for i, ledger in enumerate(expense_leaf_nodes)]
+        [f"- {ledger}" for ledger in expense_leaf_nodes]
     )
 
     system_prompt = f"""
-You are an accounting assistant specializing in expense categorization for Indian businesses using Tally ERP.
+<role>
+    You are a Senior Chartered Accountant specializing in Tally ERP categorization for Indian businesses. 
+    Your expertise lies in mapping raw invoice descriptions to specific Chart of Accounts (COA) ledgers.
+</role>
 
-Your task is to match invoice line items to the most appropriate expense ledger from the company's Chart of Accounts (COA).
+<task>
+    Match the provided invoice line item to the MOST appropriate Expense Ledger from the allowed list.
+</task>
 
-Rules (STRICT):
-1. Return ONLY the exact ledger name from the provided list (case-sensitive, exact match).
-2. Choose the MOST SPECIFIC ledger that matches the expense description.
-3. If multiple ledgers seem valid, choose the closest semantic match.
-4. If NO ledger clearly matches the invoice description, return exactly:
-   {NOT_FOUND}
-5. Do NOT guess, do NOT generalize, and do NOT invent ledger names.
+<rules>
+    1. STRICT MATCH: Return only the exact string from the provided list.
+    2. SPECIFICITY: Prioritize specific ledgers (e.g., "Microsoft Azure") over generic ones (e.g., "Software Exp").
+    3. SEMANTIC ALIGNMENT: Match the intent of the expense.
+    4. NO_MATCH_PROTOCOL: If no ledger is a clear fit, you must return: {NOT_FOUND}.
+    5. NO INVENTIONS: Do not create, hallucinate, or modify ledger names.
+</rules>
 
-Common mappings:
-- Salary/wages → "Salary" / "Salary Admin" / "Salary-Direct"
-- Software/SaaS → "Software Subscription" / "Subscriptions"
-- Office supplies → "Office Administrative Exp" / "Office Expenses"
-- Cloud services → "Microsoft Azure and Virtual Machines"
-- Professional services → "Professional Fees-Direct" / "Professional Fees-Indirect"
-- Travel → "Travelling Expenses" / "Travelling and Accomodation"
-- Rent → "Rent" / "Office Rent"
-- Utilities → "Electricity Charges" / "Water Charges"
+<mapping_guidelines>
+    - Human Resources: Salary, Wages, Stipends.
+    - Digital/SaaS: Software Subscriptions, Cloud Hosting, AWS/Azure.
+    - Infrastructure: Office Rent, Electricity, Water, Repairs.
+    - Professional: Legal Fees, Auditor Fees, Consultancy.
+</mapping_guidelines>
 
-Response format:
-Return ONLY one string:
-- Either an exact ledger name from the list
-- OR {NOT_FOUND}
+<output_format>
+    Return a valid JSON object only:
+    {{
+        "ledger": "Exact Ledger Name"
+    }}
+    In case of no match:
+    {{
+        "ledger": "{NOT_FOUND}"
+    }}
+</output_format>
 """
 
-    user_prompt = f"""Invoice line items:
-{ledger_narration}
+    user_prompt = f"""
+<input_data>
+    <invoice_item_description>
+        {ledger_narration}
+    </invoice_item_description>
 
-Available expense ledgers:
-{ledgers_formatted}
+    <available_ledgers>
+        {ledgers_formatted}
+    </available_ledgers>
+</input_data>
 
-Selected ledger name:"""
+Please select the ledger name:"""
 
     return system_prompt, user_prompt
-
 
 
 def ledger_name_prompt_cr(
@@ -97,47 +111,53 @@ def ledger_name_prompt_cr(
     invoice_description: str,
     liability_leaf_nodes: List[str]
 ) -> Tuple[str, str]:
-
+    """
+    Structured prompt for matching vendors to Liability/Sundry Creditor Ledgers.
+    """
     ledgers_formatted = "\n".join(
-        [f"{i+1}. {ledger}" for i, ledger in enumerate(liability_leaf_nodes)]
+        [f"- {ledger}" for ledger in liability_leaf_nodes]
     )
 
     system_prompt = f"""
-You are an accounting assistant specializing in Accounts Payable categorization for Indian businesses.
+<role>
+    You are an Accounts Payable Specialist. Your goal is to identify the correct Vendor Ledger (Sundry Creditor) for an incoming invoice.
+</role>
 
-Your task is to match a vendor or transaction to the correct Liability ledger from the Chart of Accounts (COA).
+<task>
+    Match the 'Vendor Name' or 'Invoice Description' to a ledger from the Liability Chart of Accounts.
+</task>
 
-Rules (STRICT):
-1. Return ONLY the exact ledger name from the provided list (case-sensitive, exact match).
-2. Vendor Match Priority:
-   - If the Vendor Name exactly matches a ledger under Sundry Creditors, select it.
-3. Reimbursements:
-   - Use "Reimbursement Payable" or a specific employee reimbursement ledger if present.
-4. Payroll:
-   - Use "Salary Payable" or "Stipend Payable" where applicable.
-5. Statutory Liabilities:
-   - Select the exact tax or statutory ledger (e.g., "TDS 194J", "GST Payable").
-6. Loans:
-   - Use ledgers under "Loans (Liability)" if applicable.
-7. If NO ledger clearly matches the vendor or transaction, return exactly:
-   {NOT_FOUND}
-8. Do NOT guess, do NOT generalize, and do NOT invent ledger names.
+<matching_logic_hierarchy>
+    1. EXACT MATCH: Look for a case-insensitive exact string match.
+    2. ABBREVIATION/ACRONYM MATCH: Recognize that "XVIPL" may represent "Xpandr Ventures India Private Limited". 
+    3. LOCATION SUFFIX: Recognize that "Vendor Name - [City/Area]" is a common Tally naming convention.
+    4. CONTEXTUAL CLUE: If the vendor name is ambiguous, use the Invoice Description to infer the category.
+</matching_logic_hierarchy>
 
-Response format:
-Return ONLY one string:
-- Either an exact ledger name from the list
-- OR {NOT_FOUND}
+<rules>
+    - Return ONLY the exact ledger name found in the list.
+    - If no match is found after checking abbreviations and descriptions, return: {NOT_FOUND}.
+    - Do not add explanations or extra text.
+</rules>
+
+<output_format>
+    Return a valid JSON object only:
+    {{
+        "ledger": "Exact Ledger Name"
+    }}
+</output_format>
 """
 
-    user_prompt = f"""Vendor Name:
-{vendor_name}
+    user_prompt = f"""
+<input_data>
+    <vendor_name_from_invoice>{vendor_name}</vendor_name_from_invoice>
+    <invoice_description>{invoice_description}</invoice_description>
+    
+    <available_liability_ledgers>
+        {ledgers_formatted}
+    </available_liability_ledgers>
+</input_data>
 
-Invoice Description:
-{invoice_description}
-
-Available Liability Ledgers:
-{ledgers_formatted}
-
-Selected ledger name:"""
+Identify the correct ledger:"""
 
     return system_prompt, user_prompt
