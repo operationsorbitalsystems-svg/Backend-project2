@@ -168,7 +168,7 @@ class TaskQueueManager:
                     self.session_manager.update_file_status(
                         task.batch_id,
                         task.filename,
-                        "failed",
+                        "failed",               
                         error=f"Mistral OCR failed: {error}"
                     )
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
@@ -192,7 +192,7 @@ class TaskQueueManager:
                 # === STEP 2a: Ollama - Expense Ledger Selection ===
                 expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
                 narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
-                
+                                    
                 custom_schema_expense = custom_ledger(expense_ledgers)
 
                 expense_system_prompt = """You are an accounting assistant. Select the most appropriate expense ledger from the Chart of Accounts (COA) based on the invoice line items.
@@ -499,7 +499,7 @@ Return only the ledger name."""
         """
 
         # Clean response
-        response_text = response_text.strip().replace('"', '').replace("'", "")
+        response_text = response_text.strip()
 
         if get_pydantic_schema:
             

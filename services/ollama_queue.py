@@ -7,6 +7,8 @@ NO invoice-specific logic - just a reusable LLM service.
 
 import asyncio
 import logging
+import re
+import json
 from typing import Optional
 from datetime import datetime
 from uuid import uuid4
@@ -143,42 +145,37 @@ class GenericOllamaQueue:
             OllamaResponse with LLM output
         """
         try:
-            # async with ollama_semaphore:
-            #     # Call Ollama chat API
-            #     response = await self.ollama_client.chat(
-            #         model=OLLAMA_MODEL_NAME,
-            #         messages=[
-            #             {
-            #                 'role': 'system',
-            #                 'content': request.system_prompt
-            #             },
-            #             {
-            #                 'role': 'user',
-            #                 'content': request.user_prompt
-            #             }
-            #         ],
-            #         options={
-            #             'temperature': 0.1,  # Low temperature for consistent output
-            #             'top_p': 0.9,
-            #         }
-            #     )
-            
             if request.metadata and 'pydantic_json_schema' in request.metadata:
-                response = await call_ollama(
+                response, response_returned = await call_ollama(
                     system_prompt=request.system_prompt,
                     user_prompt=request.user_prompt,
                     pydantic_json_schema=request.metadata['pydantic_json_schema']
 
                 )
             else:
-                response = await call_ollama(
+                response, response_returned = await call_ollama(
                     system_prompt=request.system_prompt,
                     user_prompt=request.user_prompt
                 )
 
+            if not response_returned:
+                raise Exception("Ollama call failed")
+
             # Extract response text
             if response and 'message' in response and 'content' in response['message']:
                 response_text = response['message']['content'].strip()
+
+                # Fix common JSON formatting issues from Ollama (unquoted keys/values)
+                try:
+                    # Test if it's valid JSON as-is
+                    json.loads(response_text)
+                except json.JSONDecodeError:
+                    # Fix: { key: value } → { "key": "value" }
+                    response_text = re.sub(
+                        r'\{\s*(\w+):\s*([^}]+)\s*\}',
+                        lambda m: f'{{ "{m.group(1)}": "{m.group(2).strip()}" }}',
+                        response_text
+                    )
 
                 return OllamaResponse(
                     task_id=request.task_id,
