@@ -193,7 +193,7 @@ class TaskQueueManager:
                 expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
                 narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
                 
-                custom_schema_expense = custom_ledger(expense_ledger_name)
+                custom_schema_expense = custom_ledger(expense_ledgers)
 
                 expense_system_prompt = """You are an accounting assistant. Select the most appropriate expense ledger from the Chart of Accounts (COA) based on the invoice line items.
 
@@ -215,7 +215,11 @@ Return only the ledger name."""
                     batch_id=task.batch_id,
                     system_prompt=expense_system_prompt,
                     user_prompt=expense_user_prompt,
-                    metadata={"type": "expense_selection", "filename": task.filename, "pydantic": custom_schema_expense}
+                    metadata={
+                        "type": "expense_selection",
+                        "filename": task.filename,
+                        "pydantic_json_schema": custom_schema_expense.model_json_schema()
+                    }
                 )
 
                 try:
@@ -263,7 +267,11 @@ Return only the ledger name."""
                     batch_id=task.batch_id,
                     system_prompt=vendor_system_prompt,
                     user_prompt=vendor_user_prompt,
-                    metadata={"type": "vendor_selection", "filename": task.filename, "pydantic": custom_schema_liability}
+                    metadata={
+                        "type": "vendor_selection",
+                        "filename": task.filename,
+                        "pydantic_json_schema": custom_schema_liability.model_json_schema()
+                    }
                 )
 
                 try:
@@ -351,10 +359,26 @@ Return only the ledger name."""
 
                 # Remove from processing set
                 await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-
+            
             except Exception as e:
+                import traceback
                 logger.error(f"Worker {worker_id} error: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+
+                # Update file status to failed if we have task info
+                if task:
+                    self.session_manager.update_file_status(
+                        task.batch_id,
+                        task.filename,
+                        "failed",
+                        error=str(e)
+                    )
+
+                    # Clean up processing task from Redis
+                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
+
                 await asyncio.sleep(1)
+
 
     async def _load_expense_ledgers_from_coa(self, batch_id: str) -> List[str]:
         """

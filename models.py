@@ -197,18 +197,22 @@ def custom_ledger(leaf_node_list: List[str]):
     Returns:
         Pydantic model class with constrained ledger field
     """
+    try:
+        
+        leaf_node_list.append("Suspended AC")
+        
+        # Create a Literal type with the provided list
+        ledger_literal = Literal[tuple(leaf_node_list)]
+        
+        # Dynamically create the model
+        OllamaLedger = create_model(
+            'OllamaLedger',
+            ledger=(ledger_literal, Field(description="Selected ledger account"))
+        )
+        
+        return OllamaLedger
     
-    leaf_node_list.append("Suspended AC")
-    
-    # Create a Literal type with the provided list
-    ledger_literal = Literal[tuple(leaf_node_list)]
-    
-    # Dynamically create the model
-    OllamaLedger = create_model(
-        'OllamaLedger',
-        ledger=(ledger_literal, Field(description="Selected ledger account"))
-    )
-    
-    return OllamaLedger
+    except Exception as e:
+        raise e
 
 

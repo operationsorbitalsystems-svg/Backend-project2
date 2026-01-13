@@ -163,12 +163,12 @@ class GenericOllamaQueue:
             #         }
             #     )
             
-            if request.metadata and 'pydantic' in request.metadata:
+            if request.metadata and 'pydantic_json_schema' in request.metadata:
                 response = await call_ollama(
                     system_prompt=request.system_prompt,
                     user_prompt=request.user_prompt,
-                    get_pydantic_schema= request.metadata['pydantic']
-                    
+                    pydantic_json_schema=request.metadata['pydantic_json_schema']
+
                 )
             else:
                 response = await call_ollama(

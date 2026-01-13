@@ -2,7 +2,7 @@ import ollama
 from ollama import ChatResponse
 import asyncio
 import logging
-from typing import Tuple, Optional, Type
+from typing import Tuple, Optional, Type, Dict, Any
 from pydantic import BaseModel, Field
 from config import OLLAMA_MODEL_NAME, OLLAMA_BASE_URL, ollama_semaphore
 
@@ -23,7 +23,8 @@ async def call_ollama(
     user_prompt: str,
     model_name: str = OLLAMA_MODEL_NAME,
     max_retries: int = 3,
-    get_pydantic_schema : Optional[Type[BaseModel]] = None
+    get_pydantic_schema : Optional[Type[BaseModel]] = None,
+    pydantic_json_schema: Optional[Dict[str, Any]] = None
 )-> Tuple[ChatResponse, bool]:
     """
     Call Ollama API to select ledger name with retry logic and confidence extraction.
@@ -44,7 +45,9 @@ async def call_ollama(
             if attempt > 0:
                 logger.info(f"🔄 Ollama retry {attempt}/{max_retries}")
 
-            if get_pydantic_schema:
+            if get_pydantic_schema or pydantic_json_schema:
+                # Use pre-computed schema if provided, otherwise compute from class
+                json_schema = pydantic_json_schema if pydantic_json_schema else get_pydantic_schema.model_json_schema()
 
                 async with ollama_semaphore:
                     # Call Ollama chat API
@@ -60,7 +63,7 @@ async def call_ollama(
                                 'content': user_prompt
                             }
                         ],
-                        format= get_pydantic_schema.model_json_schema(),
+                        format=json_schema,
                         options={
                             'temperature': 0.1,  # Low temperature for consistent categorization
                             'top_p': 0.9,
