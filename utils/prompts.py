@@ -46,41 +46,42 @@ def ledger_name_prompt_dr(
     ledger_narration: str,
     expense_leaf_nodes: List[str]
 ) -> Tuple[str, str]:
-    """
-    Generate system and user prompts for Ollama ledger selection.
 
-    Args:
-        ledger_narration: Concatenated invoice line item descriptions (e.g., "Item A; Item B")
-        expense_leaf_nodes: List of available expense ledger names from COA
+    ledgers_formatted = "\n".join(
+        [f"{i+1}. {ledger}" for i, ledger in enumerate(expense_leaf_nodes)]
+    )
 
-    Returns:
-        Tuple of (system_prompt, user_prompt)
-    """
-    # Format expense ledgers as numbered list
-    ledgers_formatted = "\n".join([f"{i+1}. {ledger}" for i, ledger in enumerate(expense_leaf_nodes)])
-
-    system_prompt = """You are an accounting assistant specializing in expense categorization for Indian businesses using Tally ERP.
+    system_prompt = f"""
+You are an accounting assistant specializing in expense categorization for Indian businesses using Tally ERP.
 
 Your task is to match invoice line items to the most appropriate expense ledger from the company's Chart of Accounts (COA).
 
-Rules:
-1. Return ONLY the exact ledger name from the provided list (case-sensitive, exact match)
-2. Choose the MOST SPECIFIC ledger that matches the expense description
-3. If multiple ledgers seem valid, choose the one with the closest semantic match
-4. Common mappings for Indian businesses:
-   - Salary/wages → "Salary" or "Salary Admin" or "Salary-Direct"
-   - Software/SaaS → "Software Subscription" or "Subscriptions"
-   - Office supplies → "Office Administrative Exp" or "Office Expenses"
-   - Cloud services → "Microsoft Azure and Virtual Machines" or similar
-   - Professional services → "Professional Fees-Direct" or "Professional Fees-Indirect"
-   - Travel → "Travelling Expenses" or "Travelling and Accomodation"
-   - Rent → "Rent" or "Office Rent"
-   - Utilities → "Electricity Charges" or "Water Charges"
-5. If NO ledger matches at all, return "Other Expenses" if available, else return the first ledger
+Rules (STRICT):
+1. Return ONLY the exact ledger name from the provided list (case-sensitive, exact match).
+2. Choose the MOST SPECIFIC ledger that matches the expense description.
+3. If multiple ledgers seem valid, choose the closest semantic match.
+4. If NO ledger clearly matches the invoice description, return exactly:
+   {NOT_FOUND}
+5. Do NOT guess, do NOT generalize, and do NOT invent ledger names.
 
-Response format: Return ONLY the ledger name, nothing else."""
+Common mappings:
+- Salary/wages → "Salary" / "Salary Admin" / "Salary-Direct"
+- Software/SaaS → "Software Subscription" / "Subscriptions"
+- Office supplies → "Office Administrative Exp" / "Office Expenses"
+- Cloud services → "Microsoft Azure and Virtual Machines"
+- Professional services → "Professional Fees-Direct" / "Professional Fees-Indirect"
+- Travel → "Travelling Expenses" / "Travelling and Accomodation"
+- Rent → "Rent" / "Office Rent"
+- Utilities → "Electricity Charges" / "Water Charges"
 
-    user_prompt = f"""Invoice line items: {ledger_narration}
+Response format:
+Return ONLY one string:
+- Either an exact ledger name from the list
+- OR {NOT_FOUND}
+"""
+
+    user_prompt = f"""Invoice line items:
+{ledger_narration}
 
 Available expense ledgers:
 {ledgers_formatted}
@@ -96,37 +97,43 @@ def ledger_name_prompt_cr(
     invoice_description: str,
     liability_leaf_nodes: List[str]
 ) -> Tuple[str, str]:
-    """
-    Generate system and user prompts for identifying the correct Liability ledger.
 
-    Args:
-        vendor_name: The name of the vendor from the invoice.
-        invoice_description: Description of the services or goods provided.
-        liability_leaf_nodes: List of available liability ledger names (Creditors, Provisions, etc.)
+    ledgers_formatted = "\n".join(
+        [f"{i+1}. {ledger}" for i, ledger in enumerate(liability_leaf_nodes)]
+    )
 
-    Returns:
-        Tuple of (system_prompt, user_prompt)
-    """
-    # Format liability ledgers as a numbered list
-    ledgers_formatted = "\n".join([f"{i+1}. {ledger}" for i, ledger in enumerate(liability_leaf_nodes)])
-
-    system_prompt = """You are an accounting assistant specializing in Accounts Payable categorization for Indian businesses.
+    system_prompt = f"""
+You are an accounting assistant specializing in Accounts Payable categorization for Indian businesses.
 
 Your task is to match a vendor or transaction to the correct Liability ledger from the Chart of Accounts (COA).
 
-Rules:
+Rules (STRICT):
 1. Return ONLY the exact ledger name from the provided list (case-sensitive, exact match).
-2. Primary Check: If the Vendor Name matches a specific name in "Sundry Creditors" (e.g., "Beyond Codes", "LegaLogic Consulting LLP"), select that specific ledger.
-3. Reimbursements: If the invoice is a staff reimbursement, look for "Reimbursement Payable" or the specific employee's reimbursement ledger (e.g., "Aditya Wagh Reimbursement").
-4. Payroll/Human Resources: For salaries or stipends, use "Salary Payable" or "Stipend Payable".
-5. Statutory/Taxes: For tax-related liabilities, select the specific tax ledger (e.g., "TDS 194J", "ESIC Payable").
-6. Loans: If the transaction involves shareholder funds or debt, look under "Loans (Liability)".
-7. Edge Cases: If no specific vendor name exists, categorize under the most relevant broad liability header provided (e.g., "Other Payables").
+2. Vendor Match Priority:
+   - If the Vendor Name exactly matches a ledger under Sundry Creditors, select it.
+3. Reimbursements:
+   - Use "Reimbursement Payable" or a specific employee reimbursement ledger if present.
+4. Payroll:
+   - Use "Salary Payable" or "Stipend Payable" where applicable.
+5. Statutory Liabilities:
+   - Select the exact tax or statutory ledger (e.g., "TDS 194J", "GST Payable").
+6. Loans:
+   - Use ledgers under "Loans (Liability)" if applicable.
+7. If NO ledger clearly matches the vendor or transaction, return exactly:
+   {NOT_FOUND}
+8. Do NOT guess, do NOT generalize, and do NOT invent ledger names.
 
-Response format: Return ONLY the ledger name, nothing else."""
+Response format:
+Return ONLY one string:
+- Either an exact ledger name from the list
+- OR {NOT_FOUND}
+"""
 
-    user_prompt = f"""Vendor Name: {vendor_name}
-Invoice Description: {invoice_description}
+    user_prompt = f"""Vendor Name:
+{vendor_name}
+
+Invoice Description:
+{invoice_description}
 
 Available Liability Ledgers:
 {ledgers_formatted}

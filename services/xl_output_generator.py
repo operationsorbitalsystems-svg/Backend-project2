@@ -207,7 +207,7 @@ class XLOutputGenerator:
             ledger_name=vendor_ledger_name,  # From Ollama
             ledger_amount=invoice_data.total_amount,  # Total including GST
             ledger_amount_dr_cr="Cr",
-            ledger_narration=f"{invoice_data.header.invoice_number} - {invoice_data.header.vendor_name}",
+            ledger_narration=narration,
             confidence_score=vendor_confidence
         ))
 
