@@ -290,7 +290,7 @@ async def get_batch_status(batch_id: str):
         
         # Count file statuses
         files = session.get("files", [])
-        processed = sum(1 for f in files if f["status"] in ["completed", "failed"])
+        processed = sum(1 for f in files if f["status"] in ["completed", "failed", "success"])
         pending = sum(1 for f in files if f["status"] == "pending")
         failed = sum(1 for f in files if f["status"] == "failed")
         total = len(files)
