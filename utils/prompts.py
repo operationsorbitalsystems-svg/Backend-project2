@@ -161,3 +161,69 @@ def ledger_name_prompt_cr(
 Identify the correct ledger:"""
 
     return system_prompt, user_prompt
+
+from typing import List, Tuple
+
+
+def tds_nature_prompt(
+    vendor_name: str,
+    ledger_narration: str,
+    tds_nature_options: List[str],
+    not_found_token: str = NOT_FOUND
+) -> Tuple[str, str]:
+    """
+    Structured prompt for matching a vendor and invoice narration to the correct 
+    TDS Nature of Transaction for Indian Tax compliance.
+    """
+    natures_formatted = "\n".join(
+        [f"- {nature}" for nature in tds_nature_options]
+    )
+
+    system_prompt = f"""
+<role>
+    You are an Indian Tax Compliance Expert and Chartered Accountant. 
+    Your task is to determine the "Nature of Transaction" for TDS (Tax Deducted at Source) calculation.
+</role>
+
+<task>
+    Analyze the Vendor Name and Invoice Narration to select the MOST accurate category 
+    from the 'Available TDS Natures' list.
+</task>
+
+<matching_strategy>
+    1. VENDOR CONTEXT: Use the vendor name to infer the business type (e.g., "Pvt Ltd" companies often provide professional services; "Contractors" usually fall under 194C).
+    2. KEYWORD ANALYSIS: Search for trigger words like 'Rent', 'Interest', 'Commission', 'Professional Fees', or 'Technical Services'.
+    3. SUB-SECTION PRECISION: 
+        - Choose 'Rent for Plant & Machinery' for equipment/vehicle hires.
+        - Choose 'Rent of Land Building & Furniture' for office/warehouse space.
+        - Distinguish between 'Technical Services' (194J-a) and 'Professional Services' (194J-b) based on the nature of work.
+</matching_strategy>
+
+<rules>
+    1. STRICT MATCH: Return only the exact string from the provided list.
+    2. NO_MATCH_PROTOCOL: If the data is too vague or doesn't fit a TDS category, return: {not_found_token}.
+    3. NO HALLUCINATIONS: Do not assume a section if the evidence isn't clear in the text.
+</rules>
+
+<output_format>
+    Return a valid JSON object only:
+    {{
+        "nature_of_transaction": "Exact Nature Name"
+    }}
+</output_format>
+"""
+
+    user_prompt = f"""
+<input_data>
+    <vendor_name>{vendor_name}</vendor_name>
+    <invoice_narration>{ledger_narration}</invoice_narration>
+
+    <available_tds_natures>
+        {natures_formatted}
+    </available_tds_natures>
+</input_data>
+
+Select the appropriate Nature of Transaction:"""
+
+    return system_prompt, user_prompt
+

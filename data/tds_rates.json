@@ -1,10 +1,86 @@
-{
-  "_comment": "TDS Rate Table - Phase 2 Implementation",
-  "_structure": {
-    "section_code": "TDS section code (e.g., 194C, 194J)",
-    "nature_of_tds": "Description of TDS nature (used for Ollama matching)",
-    "threshold_amount": "Threshold amount for TDS applicability",
-    "tds_rate_percent": "TDS rate percentage"
+[
+  {
+    "section": "194",
+    "nature_of_transaction": "Dividends",
+    "threshold_limit": 10000,
+    "tds_rate": 10
   },
-  "rates": []
-}
+  {
+    "section": "194A",
+    "nature_of_transaction": "Interest on bank/post office deposits",
+    "threshold_limit": 50000,
+    "tds_rate": 10
+  },
+  {
+    "section": "194A",
+    "nature_of_transaction": "Interest on bank/post office deposits (Senior Citizen)",
+    "threshold_limit": 100000,
+    "tds_rate": 10
+  },
+  {
+    "section": "194A",
+    "nature_of_transaction": "Interest (Others)",
+    "threshold_limit": 10000,
+    "tds_rate": 10
+  },
+  {
+    "section": "194C",
+    "nature_of_transaction": "Payment to contractors or sub-contractors",
+    "threshold_limit": 30000,
+    "tds_rate": 1
+  },
+  {
+    "section": "194H",
+    "nature_of_transaction": "Commission/Brokerage",
+    "threshold_limit": 20000,
+    "tds_rate": 2
+  },
+  {
+    "section": "194J(a)",
+    "nature_of_transaction": "Fees – Technical Services, Call Centre, Royalty, Distribution / Exhibition of Cinematography Films, etc.",
+    "threshold_limit": 50000,
+    "tds_rate": 2
+  },
+  {
+    "section": "194J(b)",
+    "nature_of_transaction": "Fees – All other Professional Services",
+    "threshold_limit": 50000,
+    "tds_rate": 10
+  },
+  {
+    "section": "194I(a)",
+    "nature_of_transaction": "Rent for Plant & Machinery",
+    "threshold_limit": 50000,
+    "tds_rate": 2
+  },
+  {
+    "section": "194I(b)",
+    "nature_of_transaction": "Rent of Land Building & Furniture",
+    "threshold_limit": 50000,
+    "tds_rate": 10
+  },
+  {
+    "section": "194IA",
+    "nature_of_transaction": "Transfer of certain immovable property other than agricultural land",
+    "threshold_limit": 5000000,
+    "tds_rate": 1
+  },
+  {
+    "section": "194IB",
+    "nature_of_transaction": "Rent payment by individual / HUF not covered u/s 194I",
+    "threshold_limit": 50000,
+    "tds_rate": 2
+  },
+  {
+    "section": "194Q",
+    "nature_of_transaction": "TDS on Purchase of Goods exceeding Rs. 50 Lakh",
+    "threshold_limit": 5000000,
+    "tds_rate": 0.1
+  },
+  {
+    "section": "194T",
+    "nature_of_transaction": "Payments by Partnership Firms to Partners",
+    "threshold_limit": 20000,
+    "tds_rate": 10
+  }
+]

@@ -61,3 +61,5 @@ PORT = int(os.getenv("PORT", "8000"))
 
 # Temp storage
 TEMP_STORAGE_PATH = "/tmp/invoice_uploads"
+
+TDS_FILE_PATH = os.getenv("TDS_FILE_PATH", "./data/tds_rates.json")

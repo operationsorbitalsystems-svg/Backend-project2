@@ -7,16 +7,18 @@ from uuid import uuid4
 from pydantic import BaseModel
 import aiofiles
 from config import redis_client, MAX_MISTRAL_CONCURRENT, NOT_FOUND
-from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData
+from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData, custom_tds
 from services.session_manager import get_session_manager
 from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
 from services.ollama_queue import get_ollama_queue_manager
 from utils.logger import setup_logger
-from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_expense_leaf_nodes                                  
+from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_expense_leaf_nodes, tds_nature_prompt                                  
 import re
 from utils.coa_tree_traversal import find_matching_non_leaf_node, extract_leaf_nodes
+from utils.tds import MANAGER
+
 
 logger = setup_logger()
 
@@ -342,9 +344,28 @@ class TaskQueueManager:
                     liability_leaf_nodes=liability_ledgers
                 )
                 
+                
+                # REMOVE THIS BEFORE PROD
                 logger.info(f"Worker {worker_id} Liabilities Array is : {liability_ledgers}")
 
-                # === STEP 3: Enqueue BOTH Ollama Tasks (NON-BLOCKING) ===
+                
+                # === STEP 2c: TDS Prep ===
+                tds_set = MANAGER.get_all_transaction_natures()
+                
+                custom_schema_tds = custom_tds(tds_set)
+                
+                tds_system_prompt, tds_user_prompt = tds_nature_prompt(
+                    vendor_name=vendor_name,
+                    ledger_narration=narration,
+                    tds_nature_options=tds_set
+                    
+                )
+                
+                #REMOVE THIS BEFORE PROD
+                logger.info(f"Worker {worker_id} TDS Set is : {tds_set}")
+               
+
+                # === STEP 3: Enqueue BOTH(+ TDS) Ollama Tasks (NON-BLOCKING) ===
                 expense_task_id = await self.ollama_queue.enqueue_request(
                     batch_id=task.batch_id,
                     system_prompt=expense_system_prompt,
@@ -366,17 +387,30 @@ class TaskQueueManager:
                         "pydantic_json_schema": custom_schema_liability.model_json_schema()
                     }
                 )
+                
+                tds_task_id = await self.ollama_queue.enqueue_request(
+                    batch_id=task.batch_id,
+                    system_prompt=tds_system_prompt,
+                    user_prompt=tds_user_prompt,
+                    metadata={
+                        "type": "expense_selection",
+                        "filename": task.filename,
+                        "pydantic_json_schema": custom_schema_tds.model_json_schema()
+                    }
+                )
 
                 # === STEP 4: Wait for BOTH Ollama Results in Parallel ===
                 # Use gather with return_exceptions=True to handle individual failures
                 results = await asyncio.gather(
                     self.ollama_queue.wait_for_response(expense_task_id, timeout=60),
                     self.ollama_queue.wait_for_response(vendor_task_id, timeout=60),
+                    self.ollama_queue.wait_for_response(tds_task_id, timeout=60),
                     return_exceptions=True
                 )
 
                 expense_response = results[0]
                 vendor_response = results[1]
+                tds_response = results[2]
 
                 # === STEP 5: Parse Expense Ledger (with fallback) ===
                 if isinstance(expense_response, Exception) or isinstance(expense_response, TimeoutError):
@@ -390,7 +424,8 @@ class TaskQueueManager:
                 else:
                     expense_ledger_name, expense_confidence = self._parse_ledger_response(
                         expense_response.response_text, expense_ledgers,
-                        get_pydantic_schema=custom_schema_expense
+                        get_pydantic_schema=custom_schema_expense,
+                        worker_id = worker_id
                     )
                     if not expense_ledger_name:
                         expense_ledger_name = NOT_FOUND
@@ -410,7 +445,8 @@ class TaskQueueManager:
                 else:
                     vendor_ledger_name, vendor_confidence = self._parse_ledger_response(
                         vendor_response.response_text, liability_ledgers,
-                        get_pydantic_schema=custom_schema_liability
+                        get_pydantic_schema=custom_schema_liability,
+                        worker_id = worker_id
                     )
                     if not vendor_ledger_name:
                         vendor_ledger_name = NOT_FOUND
@@ -418,7 +454,34 @@ class TaskQueueManager:
 
                 logger.info(f"Worker {worker_id} Vendor ledger: {vendor_ledger_name} (confidence: {vendor_confidence:.2f})")
 
-                # === STEP 7: Generate Multi-Row XL Output ===
+
+                # === STEP 7: TDS With Fallback ===
+                if isinstance(tds_response, Exception) or isinstance(tds_response, TimeoutError):
+                    logger.error(f"Worker {worker_id} Ollama timeout/error for tds ledger: {task.filename}")
+                    tds_ledger_name = NOT_FOUND
+                    tds_confidence = 0.0
+                elif not tds_response.success:
+                    logger.error(f"Worker {worker_id} No Ledger name for TDS through Ollama")
+                    tds_ledger_name = NOT_FOUND
+                    tds_confidence = 0.0
+                else:
+                    tds_ledger_name, tds_confidence = self._parse_ledger_response(
+                        tds_response.response_text, list(tds_set),
+                        get_pydantic_schema=custom_schema_tds,
+                        worker_id = worker_id
+                    )
+                    if not tds_ledger_name:
+                        tds_ledger_name = NOT_FOUND
+                        tds_confidence = 0.0
+
+                logger.info(f"Worker {worker_id} TDS Ledger: {tds_ledger_name} (confidence: {tds_confidence:.2f})")
+
+
+                if tds_ledger_name == NOT_FOUND:
+                    tds_ledger_name = None
+                    tds_confidence = 0
+
+                # === STEP 8: Generate Multi-Row XL Output ===
                 voucher_number = await self._get_next_voucher_number(task.batch_id)
 
                 xl_rows = XLOutputGenerator.generate_xl_output_rows(
@@ -427,7 +490,9 @@ class TaskQueueManager:
                     vendor_ledger_name=vendor_ledger_name,
                     expense_confidence=expense_confidence,
                     vendor_confidence=vendor_confidence,
-                    voucher_number=voucher_number
+                    voucher_number=voucher_number,
+                    tds_section= tds_ledger_name,
+                    tds_confidence=tds_confidence
                 )
 
                 logger.info(f"Worker {worker_id} generated {len(xl_rows)} XL rows for {task.filename} with voucher #{voucher_number}")
@@ -504,8 +569,9 @@ class TaskQueueManager:
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
 
                 await asyncio.sleep(1)
+                
 
-    def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str], get_pydantic_schema: BaseModel = None) -> Tuple[str, float]:
+    def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str], worker_id: str = None, get_pydantic_schema: BaseModel = None) -> Tuple[str, float]:
         """
         Parse Ollama response to extract ledger name and confidence.
 
@@ -524,7 +590,9 @@ class TaskQueueManager:
             
             ledger_dictionary = get_pydantic_schema.model_validate_json(response_text)
             
-            ledger_name = ledger_dictionary.ledger
+            for k in ledger_dictionary.keys():
+                ledger_name = ledger_dictionary[k]
+                break
             
         else:
             # Clean up response (remove quotes, newlines, extra spaces)
@@ -532,7 +600,9 @@ class TaskQueueManager:
 
         response_text = ledger_name
         
-        logger.info(f"Response was : {response_text}")
+        
+        #REMOVE THIS BEFORE PROD
+        logger.info(f"Worker {worker_id} Response was : {response_text}")
 
         # Check if response is valid ledger
         if response_text in valid_ledgers:

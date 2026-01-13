@@ -7,7 +7,7 @@ Generates Excel-compatible output rows for journal entry import from invoice dat
 import re
 from typing import Optional, List
 from models import InvoiceData, InvoiceLineItem, XLOutputRow
-
+from utils.tds import MANAGER
 
 class XLOutputGenerator:
     """Service for generating XL output rows from invoice data"""
@@ -108,7 +108,9 @@ class XLOutputGenerator:
         vendor_ledger_name: str,
         expense_confidence: float,
         vendor_confidence: float,
-        voucher_number: int
+        voucher_number: int,
+        tds_section : str = None,
+        tds_confidence: float = 0
     ) -> List[XLOutputRow]:
         """
         Generate multiple XL output rows per invoice (Dr/Cr pairing + GST).
@@ -202,6 +204,51 @@ class XLOutputGenerator:
                 ledger_narration=narration,
                 confidence_score=1.0
             ))
+            
+        if tds_section:
+            tds_object = MANAGER.get_transaction_by_nature(tds_section)
+            tds_ledger_name = tds_object.section
+            tds_rate = tds_object.tds_rate
+            tds_threshold = tds_object.threshold_limit
+            
+            
+            #CHECK WITH CA IF THIS IS IT OR AGAINST SUBTOTAL
+            if ledger_amount > tds_threshold:
+                tds_amount = round((float(tds_rate)*float(invoice_data.total_amount)/100), 2)
+                rows.append(XLOutputRow(
+                    voucher_date=voucher_date,
+                    voucher_type_name="Journal",
+                    voucher_number=voucher_number,
+                    buyer_supplier_address=vendor_address,
+                    buyer_supplier_pincode=pincode,
+                    ledger_name=tds_ledger_name,  # From Ollama
+                    ledger_amount= tds_amount,  # Total including GST
+                    ledger_amount_dr_cr="Cr",
+                    ledger_narration=narration,
+                    confidence_score=tds_confidence
+                ))
+                
+                
+                rows.append(XLOutputRow(
+                    voucher_date=voucher_date,
+                    voucher_type_name="Journal",
+                    voucher_number=voucher_number,
+                    buyer_supplier_address=vendor_address,
+                    buyer_supplier_pincode=pincode,
+                    ledger_name=vendor_ledger_name,  # From Ollama
+                    ledger_amount=invoice_data.total_amount - tds_amount,  # Total including GST
+                    ledger_amount_dr_cr="Cr",
+                    ledger_narration=narration,
+                    confidence_score=vendor_confidence
+                ))
+
+            
+    #         class TDSRate(TypedDict):
+    # section: str
+    # nature_of_transaction: str
+    # threshold_limit: int
+    # tds_rate: float
+            
 
         # Step 3: Cr entry for vendor/liability
         rows.append(XLOutputRow(

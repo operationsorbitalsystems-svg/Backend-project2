@@ -6,6 +6,7 @@ Phase 2 implementation - currently returns empty list.
 
 from typing import List, Optional, Dict
 from models import InvoiceData, XLOutputRow
+from utils.tds import MANAGER
 
 
 def calculate_tds_entries(

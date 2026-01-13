@@ -1,6 +1,7 @@
 from pydantic import BaseModel, constr, field_validator, create_model, Field
-from typing import List, Optional, Dict, Any, Literal
+from typing import List, Optional, Dict, Any, Literal, Set
 from datetime import datetime
+from config import NOT_FOUND
 
 # === Session Models ===
 
@@ -186,6 +187,29 @@ class OllamaResponse(BaseModel):
 class OllamaLedger(BaseModel):
     ledger : str
     
+class TDSLedger(BaseModel):
+    nature_of_transaction : str
+    
+
+def custom_tds(ledger_nature_set: Set[str]):
+    try:
+        
+        ledger_nature_set.add(NOT_FOUND)
+        
+        # Create a Literal type with the provided list
+        ledger_literal = Literal[tuple(ledger_nature_set)]
+        
+        # Dynamically create the model
+        TDSLedger = create_model(
+            'TDSLedger',
+            nature_of_transaction=(ledger_literal, Field(description="Selected tds nature"))
+        )
+        
+        return TDSLedger
+    
+    except Exception as e:
+        raise e
+    
 
 def custom_ledger(leaf_node_list: List[str]):
     """
@@ -199,7 +223,7 @@ def custom_ledger(leaf_node_list: List[str]):
     """
     try:
         
-        leaf_node_list.append("Suspended AC")
+        leaf_node_list.append(NOT_FOUND)
         
         # Create a Literal type with the provided list
         ledger_literal = Literal[tuple(leaf_node_list)]
