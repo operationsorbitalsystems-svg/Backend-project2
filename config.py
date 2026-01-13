@@ -52,6 +52,8 @@ MAX_FILES_PER_BATCH = int(os.getenv("MAX_FILES_PER_BATCH", "20"))
 OLLAMA_MODEL_NAME = os.getenv("OLLAMA_MODEL_NAME", "gemma2:2b")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
+NOT_FOUND = os.getenv("NOT_FOUND", "Suspense A/C")
+
 # Server Configuration
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))

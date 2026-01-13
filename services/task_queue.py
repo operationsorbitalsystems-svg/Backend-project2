@@ -5,7 +5,7 @@ from typing import Optional, List, Tuple, Dict
 from datetime import datetime
 from uuid import uuid4
 from pydantic import BaseModel
-from config import redis_client, MAX_MISTRAL_CONCURRENT
+from config import redis_client, MAX_MISTRAL_CONCURRENT, NOT_FOUND
 from models import TaskItem, ProcessedInvoiceResult, custom_ledger
 from services.session_manager import get_session_manager
 from services.invoice_parser import InvoiceParser
@@ -13,8 +13,12 @@ from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
 from services.ollama_queue import get_ollama_queue_manager
 from utils.logger import setup_logger
+from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_expense_leaf_nodes                                  
+import re
+
 
 logger = setup_logger()
+
 
 
 class TaskQueueManager:
@@ -127,6 +131,47 @@ class TaskQueueManager:
 
             # Retry with remaining batches (recursive)
             return await self.get_next_task_round_robin()
+        
+    def get_or_load_expense_leaves(self, batch_id: str, pattern_report : re.compile) -> Optional[list]:
+        """
+        Get expense leaf nodes from cache or load from COA file.
+        Cache is in-memory per batch. On server restart, reloads on-demand.
+        """
+        # # Check cache first
+        # if batch_id in self.expense_leaf_cache:
+        #     return self.expense_leaf_cache[batch_id]
+
+        # Load from COA file
+        try:
+            coa_data = self.file_handler.read_coa_json(batch_id)
+            if not coa_data:
+                logger.error(f"No COA data found for batch {batch_id}")
+                return None
+            
+            hierarchy = coa_data.get("hierarchy", {})
+
+            expenses = None
+            for key, value in hierarchy.items():
+                if isinstance(key, str) and pattern_report.fullmatch(key.strip()):
+                    expenses = value
+                    break
+
+            if not expenses:
+                logger.error(f"No Expenses section in COA for batch {batch_id}")
+                return None
+
+            # Extract leaf nodes
+            leaf_nodes = extract_expense_leaf_nodes(expenses)
+
+            # # Cache in memory
+            # self.expense_leaf_cache[batch_id] = leaf_nodes
+
+            logger.info(f"📋 Loaded {len(leaf_nodes)} expense ledgers for batch {batch_id}")
+            return leaf_nodes
+        
+        except Exception as e:
+            logger.info(f"Couldnt extract because e")
+            raise e
 
     async def worker_loop(self, worker_id: int):
         """
@@ -190,26 +235,36 @@ class TaskQueueManager:
                 logger.info(f"Worker {worker_id} Mistral OCR completed for {task.filename}")
 
                 # === STEP 2a: Ollama - Expense Ledger Selection ===
-                expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
+                # expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
+                expense_pattern = re.compile(r'(?i)\bexpense(s)?\b')
+                expense_ledgers = self.get_or_load_expense_leaves(task.batch_id,  expense_pattern)
                 narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
                                     
                 custom_schema_expense = custom_ledger(expense_ledgers)
 
-                expense_system_prompt = """You are an accounting assistant. Select the most appropriate expense ledger from the Chart of Accounts (COA) based on the invoice line items.
+#                 expense_system_prompt = """You are an accounting assistant. Select the most appropriate expense ledger from the Chart of Accounts (COA) based on the invoice line items.
 
-Rules:
-- Return ONLY the exact ledger name from the provided list
-- If unsure, return "Suspended AC"
-- Do not add explanations or extra text"""
+# Rules:
+# - Return ONLY the exact ledger name from the provided list
+# - If unsure, return "Suspended AC"
+# - Do not add explanations or extra text"""
 
-                expense_user_prompt = f"""Select the best expense ledger for this invoice:
+#                 expense_user_prompt = f"""Select the best expense ledger for this invoice:
 
-Invoice line items: {narration}
+# Invoice line items: {narration}
 
-Available expense ledgers:
-{chr(10).join(expense_ledgers)}
+# Available expense ledgers:
+# {chr(10).join(expense_ledgers)}
 
-Return only the ledger name."""
+# Return only the ledger name."""
+
+                expense_ledgers.append(NOT_FOUND)
+
+                expense_system_prompt, expense_user_prompt = ledger_name_prompt_dr(
+                    ledger_narration= narration,
+                    expense_leaf_nodes=expense_ledgers
+                    
+                )
 
                 expense_task_id = await self.ollama_queue.enqueue_request(
                     batch_id=task.batch_id,
@@ -241,27 +296,38 @@ Return only the ledger name."""
                 logger.info(f"Worker {worker_id} Expense ledger: {expense_ledger_name} (confidence: {expense_confidence:.2f})")
 
                 # === STEP 2b: Ollama - Vendor Ledger Selection ===
-                liability_ledgers = await self._load_liability_ledgers_from_coa(task.batch_id)
+                # liability_ledgers = await self._load_liability_ledgers_from_coa(task.batch_id)
+                liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
+                liability_ledgers = self.get_or_load_expense_leaves(task.batch_id, liability_pattern)
                 vendor_name = invoice_data.header.vendor_name
 
                 custom_schema_liability = custom_ledger(liability_ledgers)
 
-                vendor_system_prompt = """You are an accounting assistant. Select the most appropriate liability/vendor ledger from the Chart of Accounts (COA) based on the vendor name.
+#                 vendor_system_prompt = """You are an accounting assistant. Select the most appropriate liability/vendor ledger from the Chart of Accounts (COA) based on the vendor name.
 
-Rules:
-- Return ONLY the exact ledger name from the provided list
-- Match the vendor name to the closest creditor/liability ledger
-- If unsure, return "Suspended AC"
-- Do not add explanations or extra text"""
+# Rules:
+# - Return ONLY the exact ledger name from the provided list
+# - Match the vendor name to the closest creditor/liability ledger
+# - If unsure, return "Suspended AC"
+# - Do not add explanations or extra text"""
 
-                vendor_user_prompt = f"""Select the best liability ledger for this vendor:
+#                 vendor_user_prompt = f"""Select the best liability ledger for this vendor:
 
-Vendor name: {vendor_name}
+# Vendor name: {vendor_name}
 
-Available liability ledgers:
-{chr(10).join(liability_ledgers)}
+# Available liability ledgers:
+# {chr(10).join(liability_ledgers)}
 
-Return only the ledger name."""
+# Return only the ledger name."""
+
+                liability_ledgers.append(NOT_FOUND)
+
+                vendor_system_prompt, vendor_user_prompt = ledger_name_prompt_cr(
+                    vendor_name=vendor_name,
+                    invoice_description=narration,
+                    liability_leaf_nodes=liability_ledgers
+                    
+                )
 
                 vendor_task_id = await self.ollama_queue.enqueue_request(
                     batch_id=task.batch_id,
@@ -380,111 +446,111 @@ Return only the ledger name."""
                 await asyncio.sleep(1)
 
 
-    async def _load_expense_ledgers_from_coa(self, batch_id: str) -> List[str]:
-        """
-        Load expense leaf nodes from COA (cached per batch).
+    # async def _load_expense_ledgers_from_coa(self, batch_id: str) -> List[str]:
+    #     """
+    #     Load expense leaf nodes from COA (cached per batch).
 
-        Args:
-            batch_id: Batch identifier
+    #     Args:
+    #         batch_id: Batch identifier
 
-        Returns:
-            List of expense ledger names
-        """
-        # Check cache first
-        if batch_id in self.expense_ledgers_cache:
-            return self.expense_ledgers_cache[batch_id]
+    #     Returns:
+    #         List of expense ledger names
+    #     """
+    #     # Check cache first
+    #     if batch_id in self.expense_ledgers_cache:
+    #         return self.expense_ledgers_cache[batch_id]
 
-        # Load COA from session
-        session = self.session_manager.get_session(batch_id)
-        if not session or "coa_data" not in session:
-            logger.warning(f"COA not found for batch {batch_id}, returning fallback")
-            return ["Suspended AC"]
+    #     # Load COA from session
+    #     session = self.session_manager.get_session(batch_id)
+    #     if not session or "coa_data" not in session:
+    #         logger.warning(f"COA not found for batch {batch_id}, returning fallback")
+    #         return ["Suspended AC"]
 
-        coa_data = session["coa_data"]
+    #     coa_data = session["coa_data"]
 
-        # Parse COA data if it's a string
-        if isinstance(coa_data, str):
-            try:
-                coa_data = json.loads(coa_data)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse COA data for batch {batch_id}")
-                return ["Suspended AC"]
+    #     # Parse COA data if it's a string
+    #     if isinstance(coa_data, str):
+    #         try:
+    #             coa_data = json.loads(coa_data)
+    #         except json.JSONDecodeError:
+    #             logger.error(f"Failed to parse COA data for batch {batch_id}")
+    #             return ["Suspended AC"]
 
-        # Extract expense ledgers from flat_list
-        flat_list = coa_data.get("flat_list", [])
+    #     # Extract expense ledgers from flat_list
+    #     flat_list = coa_data.get("flat_list", [])
 
-        # Find expense ledgers (ledgers under "Expense" or "Expenses" groups)
-        expense_ledgers = [
-            ledger for ledger in flat_list
-            if "expense" in ledger.lower() or "cost" in ledger.lower()
-        ]
+    #     # Find expense ledgers (ledgers under "Expense" or "Expenses" groups)
+    #     expense_ledgers = [
+    #         ledger for ledger in flat_list
+    #         if "expense" in ledger.lower() or "cost" in ledger.lower()
+    #     ]
 
-        # If no expense ledgers found, use all leaf nodes as fallback
-        if not expense_ledgers:
-            expense_ledgers = flat_list[:50]  # Limit to first 50 to avoid token overflow
+    #     # If no expense ledgers found, use all leaf nodes as fallback
+    #     if not expense_ledgers:
+    #         expense_ledgers = flat_list[:50]  # Limit to first 50 to avoid token overflow
 
-        # Always include fallback
-        if "Suspended AC" not in expense_ledgers:
-            expense_ledgers.append("Suspended AC")
+    #     # Always include fallback
+    #     if "Suspended AC" not in expense_ledgers:
+    #         expense_ledgers.append("Suspended AC")
 
-        # Cache result
-        self.expense_ledgers_cache[batch_id] = expense_ledgers
-        logger.info(f"Loaded {len(expense_ledgers)} expense ledgers for batch {batch_id}")
+    #     # Cache result
+    #     self.expense_ledgers_cache[batch_id] = expense_ledgers
+    #     logger.info(f"Loaded {len(expense_ledgers)} expense ledgers for batch {batch_id}")
 
-        return expense_ledgers
+    #     return expense_ledgers
 
-    async def _load_liability_ledgers_from_coa(self, batch_id: str) -> List[str]:
-        """
-        Load liability leaf nodes from COA (cached per batch).
+    # async def _load_liability_ledgers_from_coa(self, batch_id: str) -> List[str]:
+    #     """
+    #     Load liability leaf nodes from COA (cached per batch).
 
-        Args:
-            batch_id: Batch identifier
+    #     Args:
+    #         batch_id: Batch identifier
 
-        Returns:
-            List of liability ledger names
-        """
-        # Check cache first
-        if batch_id in self.liability_ledgers_cache:
-            return self.liability_ledgers_cache[batch_id]
+    #     Returns:
+    #         List of liability ledger names
+    #     """
+    #     # Check cache first
+    #     if batch_id in self.liability_ledgers_cache:
+    #         return self.liability_ledgers_cache[batch_id]
 
-        # Load COA from session
-        session = self.session_manager.get_session(batch_id)
-        if not session or "coa_data" not in session:
-            logger.warning(f"COA not found for batch {batch_id}, returning fallback")
-            return ["Suspended AC"]
+    #     # Load COA from session
+    #     session = self.session_manager.get_session(batch_id)
+    #     if not session or "coa_data" not in session:
+    #         logger.warning(f"COA not found for batch {batch_id}, returning fallback")
+    #         return ["Suspended AC"]
 
-        coa_data = session["coa_data"]
+    #     coa_data = session["coa_data"]
 
-        # Parse COA data if it's a string
-        if isinstance(coa_data, str):
-            try:
-                coa_data = json.loads(coa_data)
-            except json.JSONDecodeError:
-                logger.error(f"Failed to parse COA data for batch {batch_id}")
-                return ["Suspended AC"]
+    #     # Parse COA data if it's a string
+    #     if isinstance(coa_data, str):
+    #         try:
+    #             coa_data = json.loads(coa_data)
+    #         except json.JSONDecodeError:
+    #             logger.error(f"Failed to parse COA data for batch {batch_id}")
+    #             return ["Suspended AC"]
 
-        # Extract liability ledgers from flat_list
-        flat_list = coa_data.get("flat_list", [])
+    #     # Extract liability ledgers from flat_list
+    #     flat_list = coa_data.get("flat_list", [])
 
-        # Find liability ledgers (ledgers under "Liability" or "Creditors" groups)
-        liability_ledgers = [
-            ledger for ledger in flat_list
-            if "liability" in ledger.lower() or "creditor" in ledger.lower() or "payable" in ledger.lower()
-        ]
+    #     # Find liability ledgers (ledgers under "Liability" or "Creditors" groups)
+    #     liability_ledgers = [
+    #         ledger for ledger in flat_list
+    #         if "liability" in ledger.lower() or "creditor" in ledger.lower() or "payable" in ledger.lower()
+    #     ]
 
-        # If no liability ledgers found, use all leaf nodes as fallback
-        if not liability_ledgers:
-            liability_ledgers = flat_list[:50]  # Limit to first 50 to avoid token overflow
+    #     # If no liability ledgers found, use all leaf nodes as fallback
+    #     if not liability_ledgers:
+    #         liability_ledgers = flat_list[:50]  # Limit to first 50 to avoid token overflow
 
-        # Always include fallback
-        if "Suspended AC" not in liability_ledgers:
-            liability_ledgers.append("Suspended AC")
+    #     # Always include fallback
+    #     if "Suspended AC" not in liability_ledgers:
+    #         liability_ledgers.append("Suspended AC")
 
-        # Cache result
-        self.liability_ledgers_cache[batch_id] = liability_ledgers
-        logger.info(f"Loaded {len(liability_ledgers)} liability ledgers for batch {batch_id}")
+    #     # Cache result
+    #     self.liability_ledgers_cache[batch_id] = liability_ledgers
+    #     logger.info(f"Loaded {len(liability_ledgers)} liability ledgers for batch {batch_id}")
 
-        return liability_ledgers
+    #     return liability_ledgers
 
     def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str], get_pydantic_schema: BaseModel = None) -> Tuple[str, float]:
         """

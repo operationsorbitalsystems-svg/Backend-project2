@@ -1,6 +1,7 @@
 from coa_utils.models import COAOutput
 from models import InvoiceData
 from typing import Tuple, List, Dict, Any
+from config import NOT_FOUND
 
 
 def extract_expense_leaf_nodes(coa_hierarchy: Dict[str, Any]) -> List[str]:

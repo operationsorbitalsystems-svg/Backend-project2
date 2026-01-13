@@ -11,3 +11,4 @@ curl -s "http://localhost:8000/api/sessions/$BATCH_ID/status" | jq
 
 # 4. Debug COA - Check flat_list of ledgers
 curl -s "http://localhost:8000/api/sessions/$BATCH_ID/status" | jq '.coa_data.flat_list'
+
