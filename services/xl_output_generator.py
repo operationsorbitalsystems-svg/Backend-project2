@@ -141,6 +141,12 @@ class XLOutputGenerator:
         has_gst = XLOutputGenerator.detect_has_gst(invoice_data)
         ledger_amount = invoice_data.subtotal if (has_gst and invoice_data.subtotal) else invoice_data.total_amount
 
+        # if has_gst:
+        #     ledger_amount = invoice_data.subtotal
+            
+        # else:
+        #     ledger_amount = invoice_data.total_amount if invoice_data.total_amount > invoice_data.subtotal else invoice_data.subtotal                                                                                                                                                                                                                                   
+
         rows.append(XLOutputRow(
             voucher_date=voucher_date,
             voucher_type_name="Journal",
