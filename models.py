@@ -198,7 +198,7 @@ def custom_ledger(leaf_node_list: List[str]):
         Pydantic model class with constrained ledger field
     """
     
-    leaf_node_list.append("Select AC")
+    leaf_node_list.append("Suspended AC")
     
     # Create a Literal type with the provided list
     ledger_literal = Literal[tuple(leaf_node_list)]

@@ -4,9 +4,9 @@ import logging
 from typing import Optional, List, Tuple, Dict
 from datetime import datetime
 from uuid import uuid4
-
+from pydantic import BaseModel
 from config import redis_client, MAX_MISTRAL_CONCURRENT
-from models import TaskItem, ProcessedInvoiceResult, InvoiceData, XLOutputRow
+from models import TaskItem, ProcessedInvoiceResult, custom_ledger
 from services.session_manager import get_session_manager
 from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
@@ -192,6 +192,8 @@ class TaskQueueManager:
                 # === STEP 2a: Ollama - Expense Ledger Selection ===
                 expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
                 narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
+                
+                custom_schema_expense = custom_ledger(expense_ledger_name)
 
                 expense_system_prompt = """You are an accounting assistant. Select the most appropriate expense ledger from the Chart of Accounts (COA) based on the invoice line items.
 
@@ -213,7 +215,7 @@ Return only the ledger name."""
                     batch_id=task.batch_id,
                     system_prompt=expense_system_prompt,
                     user_prompt=expense_user_prompt,
-                    metadata={"type": "expense_selection", "filename": task.filename}
+                    metadata={"type": "expense_selection", "filename": task.filename, "pydantic": custom_schema_expense}
                 )
 
                 try:
@@ -236,6 +238,8 @@ Return only the ledger name."""
                 liability_ledgers = await self._load_liability_ledgers_from_coa(task.batch_id)
                 vendor_name = invoice_data.header.vendor_name
 
+                custom_schema_liability = custom_ledger(liability_ledgers)
+
                 vendor_system_prompt = """You are an accounting assistant. Select the most appropriate liability/vendor ledger from the Chart of Accounts (COA) based on the vendor name.
 
 Rules:
@@ -257,7 +261,7 @@ Return only the ledger name."""
                     batch_id=task.batch_id,
                     system_prompt=vendor_system_prompt,
                     user_prompt=vendor_user_prompt,
-                    metadata={"type": "vendor_selection", "filename": task.filename}
+                    metadata={"type": "vendor_selection", "filename": task.filename, "pydantic": custom_schema_liability}
                 )
 
                 try:
@@ -454,7 +458,7 @@ Return only the ledger name."""
 
         return liability_ledgers
 
-    def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str]) -> Tuple[str, float]:
+    def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str], get_pydantic_schema: BaseModel = None) -> Tuple[str, float]:
         """
         Parse Ollama response to extract ledger name and confidence.
 
@@ -465,8 +469,21 @@ Return only the ledger name."""
         Returns:
             Tuple of (ledger_name, confidence_score)
         """
+
         # Clean response
         response_text = response_text.strip().replace('"', '').replace("'", "")
+
+        if get_pydantic_schema:
+            
+            ledger_dictionary = get_pydantic_schema.model_validate_json(response_text)
+            
+            ledger_name = ledger_dictionary.ledger
+            
+        else:
+            # Clean up response (remove quotes, newlines, extra spaces)
+            ledger_name = output.replace('"', '').replace("'", "").strip()
+
+        response_text = ledger_name
 
         # Check if response is valid ledger
         if response_text in valid_ledgers:

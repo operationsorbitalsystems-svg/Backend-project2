@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from config import redis_client, MAX_OLLAMA_CONCURRENT_CALLS, ollama_semaphore
 from models import OllamaRequest, OllamaResponse
-from services.ollama_api_call import ollama_client
+from services.ollama_api_call import ollama_client, call_ollama
 from config import OLLAMA_MODEL_NAME
 from utils.logger import setup_logger
 
@@ -143,24 +143,37 @@ class GenericOllamaQueue:
             OllamaResponse with LLM output
         """
         try:
-            async with ollama_semaphore:
-                # Call Ollama chat API
-                response = await self.ollama_client.chat(
-                    model=OLLAMA_MODEL_NAME,
-                    messages=[
-                        {
-                            'role': 'system',
-                            'content': request.system_prompt
-                        },
-                        {
-                            'role': 'user',
-                            'content': request.user_prompt
-                        }
-                    ],
-                    options={
-                        'temperature': 0.1,  # Low temperature for consistent output
-                        'top_p': 0.9,
-                    }
+            # async with ollama_semaphore:
+            #     # Call Ollama chat API
+            #     response = await self.ollama_client.chat(
+            #         model=OLLAMA_MODEL_NAME,
+            #         messages=[
+            #             {
+            #                 'role': 'system',
+            #                 'content': request.system_prompt
+            #             },
+            #             {
+            #                 'role': 'user',
+            #                 'content': request.user_prompt
+            #             }
+            #         ],
+            #         options={
+            #             'temperature': 0.1,  # Low temperature for consistent output
+            #             'top_p': 0.9,
+            #         }
+            #     )
+            
+            if request.metadata and 'pydantic' in request.metadata:
+                response = await call_ollama(
+                    system_prompt=request.system_prompt,
+                    user_prompt=request.user_prompt,
+                    get_pydantic_schema= request.metadata['pydantic']
+                    
+                )
+            else:
+                response = await call_ollama(
+                    system_prompt=request.system_prompt,
+                    user_prompt=request.user_prompt
                 )
 
             # Extract response text

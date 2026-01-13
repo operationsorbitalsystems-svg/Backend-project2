@@ -1,4 +1,5 @@
 import ollama
+from ollama import ChatResponse
 import asyncio
 import logging
 from typing import Tuple, Optional, Type
@@ -17,13 +18,13 @@ class LedgerNameOutputFormat(BaseModel):
     ledger_name: str = Field(description="The exact ledger name from the expense list")
 
 
-async def call_ollama_for_ledger(
+async def call_ollama(
     system_prompt: str,
     user_prompt: str,
     model_name: str = OLLAMA_MODEL_NAME,
     max_retries: int = 3,
     get_pydantic_schema : Optional[Type[BaseModel]] = None
-) -> Tuple[bool, Optional[str], Optional[float], Optional[str]]:
+)-> Tuple[ChatResponse, bool]:
     """
     Call Ollama API to select ledger name with retry logic and confidence extraction.
 
@@ -89,25 +90,26 @@ async def call_ollama_for_ledger(
 
             # Extract ledger name from response
             if response and 'message' in response and 'content' in response['message']:
-                # ledger_name = response['message']['content'].strip()
-                output = response['message']['content']
-                if get_pydantic_schema:
+                # # ledger_name = response['message']['content'].strip()
+                # output = response['message']['content']
+                # if get_pydantic_schema:
                     
-                    ledger_dictionary = get_pydantic_schema.model_validate_json(output)
+                #     ledger_dictionary = get_pydantic_schema.model_validate_json(output)
                     
-                    ledger_name = ledger_dictionary.ledger
+                #     ledger_name = ledger_dictionary.ledger
                     
-                else:
-                    # Clean up response (remove quotes, newlines, extra spaces)
-                    ledger_name = output.replace('"', '').replace("'", "").strip()
+                # else:
+                #     # Clean up response (remove quotes, newlines, extra spaces)
+                #     ledger_name = output.replace('"', '').replace("'", "").strip()
 
-                # Extract confidence score from token probabilities (if available)
-                # Note: Ollama doesn't easily expose token probabilities by default
-                # We use a placeholder approach: assume high confidence if response is clean
-                confidence_score = _estimate_confidence(ledger_name, response)
+                # # Extract confidence score from token probabilities (if available)
+                # # Note: Ollama doesn't easily expose token probabilities by default
+                # # We use a placeholder approach: assume high confidence if response is clean
+                # confidence_score = _estimate_confidence(ledger_name, response)
 
-                # logger.info(f"✅ Ollama selected ledger: {ledger_name} (confidence: {confidence_score:.2f})")
-                return True, ledger_name, confidence_score, None
+                # # logger.info(f"✅ Ollama selected ledger: {ledger_name} (confidence: {confidence_score:.2f})")
+                # return True, ledger_name, confidence_score, None
+                return response, True
             else:
                 raise ValueError("Invalid response format from Ollama")
 
@@ -127,9 +129,11 @@ async def call_ollama_for_ledger(
                     logger.error(f"❌ Ollama failed after {max_retries} retries: {error_msg}")
                 else:
                     logger.error(f"❌ Non-retryable Ollama error: {error_msg}")
-                return False, None, None, error_msg
+                return response, False
 
-    return False, None, None, "Failed after all retries"
+
+##FIX THIS LATER
+    return ChatResponse, False
 
 
 def _estimate_confidence(ledger_name: str, response: dict) -> float:
