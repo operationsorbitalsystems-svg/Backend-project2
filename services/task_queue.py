@@ -221,7 +221,8 @@ Return only the ledger name."""
                 try:
                     expense_response = await self.ollama_queue.wait_for_response(expense_task_id, timeout=60)
                     expense_ledger_name, expense_confidence = self._parse_ledger_response(
-                        expense_response.response_text, expense_ledgers
+                        expense_response.response_text, expense_ledgers,
+                        get_pydantic_schema=custom_schema_expense
                     )
                 except TimeoutError:
                     logger.error(f"Worker {worker_id} Ollama timeout for expense ledger: {task.filename}")
@@ -229,6 +230,7 @@ Return only the ledger name."""
                     expense_confidence = 0.0
 
                 if not expense_ledger_name or not expense_response.success:
+                    logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
                     expense_ledger_name = "Suspended AC"
                     expense_confidence = 0.0
 
@@ -267,7 +269,8 @@ Return only the ledger name."""
                 try:
                     vendor_response = await self.ollama_queue.wait_for_response(vendor_task_id, timeout=60)
                     vendor_ledger_name, vendor_confidence = self._parse_ledger_response(
-                        vendor_response.response_text, liability_ledgers
+                        vendor_response.response_text, liability_ledgers,
+                        get_pydantic_schema=custom_schema_liability
                     )
                 except TimeoutError:
                     logger.error(f"Worker {worker_id} Ollama timeout for vendor ledger: {task.filename}")
@@ -275,6 +278,7 @@ Return only the ledger name."""
                     vendor_confidence = 0.0
 
                 if not vendor_ledger_name or not vendor_response.success:
+                    logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
                     vendor_ledger_name = "Suspended AC"
                     vendor_confidence = 0.0
 
@@ -484,6 +488,8 @@ Return only the ledger name."""
             ledger_name = output.replace('"', '').replace("'", "").strip()
 
         response_text = ledger_name
+        
+        logger.info(f"Response was : {response_text}")
 
         # Check if response is valid ledger
         if response_text in valid_ledgers:
