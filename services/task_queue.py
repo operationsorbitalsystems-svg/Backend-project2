@@ -591,19 +591,25 @@ class TaskQueueManager:
         response_text = response_text.strip()
 
         if get_pydantic_schema:
-            # Validate and parse the JSON response
-            validated_model = get_pydantic_schema.model_validate_json(response_text)
+            try:
+                # Try strict Pydantic validation first
+                validated_model = get_pydantic_schema.model_validate_json(response_text)
 
-            # Extract the actual field value from the model
-            # For expense/vendor: 'ledger' field
-            # For TDS: 'nature_of_transaction' field
-            if hasattr(validated_model, 'ledger'):
-                ledger_name = validated_model.ledger
-            elif hasattr(validated_model, 'nature_of_transaction'):
-                ledger_name = validated_model.nature_of_transaction
-            else:
-                # Fallback: get first field value
-                ledger_name = next(iter(validated_model.model_dump().values()))
+                if hasattr(validated_model, 'ledger'):
+                    ledger_name = validated_model.ledger
+                elif hasattr(validated_model, 'nature_of_transaction'):
+                    ledger_name = validated_model.nature_of_transaction
+                else:
+                    ledger_name = next(iter(validated_model.model_dump().values()))
+            except Exception as e:
+                # Pydantic validation failed - fall back to manual JSON parsing
+                # Let fuzzy matching below handle validation
+                logger.warning(f"Pydantic validation failed, using fuzzy matching: {e}")
+                try:
+                    parsed = json.loads(response_text)
+                    ledger_name = parsed.get('ledger') or parsed.get('nature_of_transaction') or next(iter(parsed.values()))
+                except json.JSONDecodeError:
+                    ledger_name = response_text.replace('"', '').replace("'", "").strip()
         else:
             # Clean up response (remove quotes, newlines, extra spaces)
             ledger_name = response_text.replace('"', '').replace("'", "").strip()

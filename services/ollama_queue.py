@@ -165,6 +165,12 @@ class GenericOllamaQueue:
             if response and 'message' in response and 'content' in response['message']:
                 response_text = response['message']['content'].strip()
 
+                # Extract JSON object from response (handles markdown, prefixes, etc.)
+                first_brace = response_text.find('{')
+                last_brace = response_text.rfind('}')
+                if first_brace != -1 and last_brace > first_brace:
+                    response_text = response_text[first_brace:last_brace+1]
+
                 # Fix common JSON formatting issues from Ollama (unquoted keys/values)
                 try:
                     # Test if it's valid JSON as-is
