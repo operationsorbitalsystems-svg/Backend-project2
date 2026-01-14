@@ -8,6 +8,8 @@ import re
 from typing import Optional, List
 from models import InvoiceData, InvoiceLineItem, XLOutputRow
 from utils.tds import MANAGER
+from utils.logger import setup_logger
+logger = setup_logger()
 
 class XLOutputGenerator:
     """Service for generating XL output rows from invoice data"""
@@ -207,9 +209,11 @@ class XLOutputGenerator:
             
         if tds_section:
             tds_object = MANAGER.get_transaction_by_nature(tds_section)
-            tds_ledger_name = tds_object.section
-            tds_rate = tds_object.tds_rate
-            tds_threshold = tds_object.threshold_limit
+            logger.info(f"TDS OBJECT IS {tds_object}")
+            tds_ledger_name = tds_object['section']
+            tds_rate = tds_object['tds_rate']
+            tds_threshold = tds_object['threshold_limit']
+
             
             
             #CHECK WITH CA IF THIS IS IT OR AGAINST SUBTOTAL
@@ -241,6 +245,8 @@ class XLOutputGenerator:
                     ledger_narration=narration,
                     confidence_score=vendor_confidence
                 ))
+                
+                return rows
 
             
     #         class TDSRate(TypedDict):

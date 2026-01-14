@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 from typing import List, Optional, TypedDict, Set
 from config import TDS_FILE_PATH
+from utils.logger import setup_logger
+logger = setup_logger()
 
 # Define the structure for type safety
 class TDSRate(TypedDict):
@@ -32,6 +34,7 @@ class TDSManager:
     def get_all_transaction_natures(self) -> Set[str]:
         """Returns a single list of all 'nature_of_transaction' values."""
         try:
+            logger.info(f"{self.data}, {[item for item in self.data]}")
             return set([item['nature_of_transaction'] for item in self.data])
         except KeyError as e:
             print(f"Data mapping error: Missing key {e}")

@@ -7,6 +7,7 @@ import logging
 
 from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT, MAX_MAIN_WORKERS, redis_client
 from utils.logger import setup_logger
+from utils.tds import MANAGER
 from models import (
     SessionCreateResponse, BatchStatusResponse, UploadResponse,
     FileStatus, ProcessedInvoiceResult,
@@ -507,6 +508,9 @@ async def startup_event():
     if not ollama_healthy:
         logger.error(f"⚠️ Ollama health check failed: {ollama_error}")
         logger.warning("⚠️ Continuing without Ollama - ledger selection will fail!")
+
+    #Loading TDS Json
+    MANAGER.load_data()
 
     # Recover crashed tasks from all queues
     await task_queue.recover_crashed_tasks()

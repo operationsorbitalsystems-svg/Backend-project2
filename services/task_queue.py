@@ -411,6 +411,8 @@ class TaskQueueManager:
                 expense_response = results[0]
                 vendor_response = results[1]
                 tds_response = results[2]
+                
+                logger.info(f"Output For TDS Was : {tds_response}")
 
                 # === STEP 5: Parse Expense Ledger (with fallback) ===
                 if isinstance(expense_response, Exception) or isinstance(expense_response, TimeoutError):
@@ -456,6 +458,8 @@ class TaskQueueManager:
 
 
                 # === STEP 7: TDS With Fallback ===
+
+                
                 if isinstance(tds_response, Exception) or isinstance(tds_response, TimeoutError):
                     logger.error(f"Worker {worker_id} Ollama timeout/error for tds ledger: {task.filename}")
                     tds_ledger_name = NOT_FOUND
