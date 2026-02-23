@@ -3,7 +3,7 @@ import shutil
 from pathlib import Path
 from typing import List, Tuple, Optional
 import logging
-from config import TEMP_STORAGE_PATH, MAX_FILES_PER_BATCH
+from config import TEMP_STORAGE_PATH, MAX_FILES_PER_BATCH, CLEANUP_AGE
 from utils.validators import validate_pdf_file, validate_file_size
 
 from utils.logger import setup_logger
@@ -89,7 +89,7 @@ class FileHandler:
             logger.error(f"Error cleaning up batch {batch_id}: {str(e)}")
             return False
     
-    def cleanup_old_batches(self, age_hours: int = 1) -> int:
+    def cleanup_old_batches(self, age_hours: float = CLEANUP_AGE) -> int:
         """
         Delete batches older than specified hours
         Returns: number of batches deleted

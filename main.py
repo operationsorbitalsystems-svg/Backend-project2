@@ -8,7 +8,7 @@ from datetime import datetime
 import logging
 
 # ── Logging must be configured FIRST, before any service module imports ───────
-from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT, MAX_MAIN_WORKERS, redis_client
+from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT, MAX_MAIN_WORKERS, redis_client, CLEANUP_BATCH_HOURS, CLEANUP_AGE
 from utils.logger import configure_logging, setup_logger, batch_id_var
 
 configure_logging(debug=DEBUG)
@@ -500,10 +500,10 @@ async def cleanup_old_batches():
     """
     while True:
         try:
-            await asyncio.sleep(3600)  # Run every 1 hour
+            await asyncio.sleep(CLEANUP_BATCH_HOURS*3600)  # Run every 1 hour
             logger.info("🧹 Starting cleanup of old batches...")
             
-            deleted_count = file_handler.cleanup_old_batches(age_hours=4)
+            deleted_count = file_handler.cleanup_old_batches(age_hours=CLEANUP_AGE)
             
             if deleted_count > 0:
                 logger.info(f"🧹 Cleaned up {deleted_count} old batch directories")

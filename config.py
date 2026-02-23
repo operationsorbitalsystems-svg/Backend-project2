@@ -64,7 +64,7 @@ TEMP_STORAGE_PATH = "/tmp/invoice_uploads"
 TDS_FILE_PATH = os.getenv("TDS_FILE_PATH", "./data/tds_rates.json")
 
 
-AWS_REGION=os.getenv("AWS_REGION","ap-south-1")
+AWS_REGION=os.getenv("AWS_DEFAULT_REGION","ap-south-1")
 
 BEDROCK_MODEL_ID=os.getenv("BEDROCK_MODEL_ID","google.gemma-3-12b-it")
 
@@ -77,3 +77,6 @@ LOG_CLOUDWATCH_ENABLED = os.getenv("LOG_CLOUDWATCH_ENABLED", "false").lower() ==
 LOG_FILE_ENABLED       = os.getenv("LOG_FILE_ENABLED", "true").lower() == "true"
 CW_LOG_GROUP           = os.getenv("CW_LOG_GROUP", "/invoice-parser/app")
 
+
+CLEANUP_BATCH_HOURS = float(os.getenv("CLEANUP_BATCH_HOURS", "0.5"))
+CLEANUP_AGE = float(os.getenv("CLEANUP_AGE", "0.5"))
