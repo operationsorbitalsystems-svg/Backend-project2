@@ -7,7 +7,8 @@ from pathlib import Path
 from config import MISTRAL_API_KEY, mistral_semaphore
 from models import InvoiceData, InvoiceHeader, InvoiceLineItem
 from utils.logger import setup_logger
-
+from mistralai import Mistral
+                
 logger = setup_logger()
 
 
@@ -28,7 +29,7 @@ class InvoiceParser:
         
         if self.api_key:
             try:
-                from mistralai import Mistral
+
                 self.client = Mistral(api_key=self.api_key)
                 logger.info("Mistral client initialized successfully")
             except ImportError:
