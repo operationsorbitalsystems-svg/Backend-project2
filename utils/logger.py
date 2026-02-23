@@ -1,43 +1,57 @@
 import logging
 import logging.handlers
+import json
 from pathlib import Path
+from datetime import datetime
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        log_record = {
+            "timestamp": datetime.utcfromtimestamp(record.created).isoformat() + "Z",
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno,
+        }
+
+        # Include extra fields if provided
+        if hasattr(record, "extra"):
+            log_record.update(record.extra)
+
+        return json.dumps(log_record)
+
 
 def setup_logger(debug: bool = False):
-    """Configure logger with file and console handlers"""
-    
-    # Create logs directory if not exists
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
-    
+
     logger = logging.getLogger("invoice_parser")
-    # Remove existing handlers to avoid duplicates
     logger.handlers = []
-    
+    logger.propagate = False
+
     level = logging.DEBUG if debug else logging.INFO
     logger.setLevel(level)
-    
-    # File handler - Rotating file handler
+
     file_handler = logging.handlers.RotatingFileHandler(
         log_dir / "app.log",
-        maxBytes=10485760,  # 10MB
+        maxBytes=10485760,
         backupCount=5
     )
     file_handler.setLevel(logging.DEBUG)
-    
-    # Console handler
+
     console_handler = logging.StreamHandler()
     console_handler.setLevel(level)
-    
-    # Formatter
-    formatter = logging.Formatter(
-        "[%(asctime)s] %(levelname)s - %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
-    )
-    
-    file_handler.setFormatter(formatter)
-    console_handler.setFormatter(formatter)
-    
+
+    json_formatter = JsonFormatter()
+
+    file_handler.setFormatter(json_formatter)
+    console_handler.setFormatter(json_formatter)
+
     logger.addHandler(file_handler)
     logger.addHandler(console_handler)
-    
+
     return logger
+
