@@ -346,7 +346,7 @@ class TaskQueueManager:
                 
                 
                 # REMOVE THIS BEFORE PROD
-                logger.info(f"Worker {worker_id} Liabilities Array is : {liability_ledgers}")
+                logger.debug(f"Worker {worker_id} Liabilities Array is : {liability_ledgers}")
 
                 
                 # === STEP 2c: TDS Prep ===
