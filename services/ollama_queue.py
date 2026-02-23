@@ -13,10 +13,10 @@ from typing import Optional
 from datetime import datetime
 from uuid import uuid4
 
-from config import redis_client, MAX_OLLAMA_CONCURRENT_CALLS, ollama_semaphore
+from config import redis_client
 from models import OllamaRequest, OllamaResponse
-from services.ollama_api_call import ollama_client, call_ollama
-from config import OLLAMA_MODEL_NAME
+from services.ollama_api_call import call_ollama
+from services.bedrock import call_bedrock
 from utils.logger import setup_logger
 
 logger = setup_logger()
@@ -40,7 +40,6 @@ class GenericOllamaQueue:
             raise ValueError("Redis client is required for Ollama queue")
 
         self.redis = redis_client
-        self.ollama_client = ollama_client
         logger.info("GenericOllamaQueue initialized")
 
     async def enqueue_request(
@@ -145,15 +144,28 @@ class GenericOllamaQueue:
             OllamaResponse with LLM output
         """
         try:
+            # if request.metadata and 'pydantic_json_schema' in request.metadata:
+            #     response, response_returned = await call_ollama(
+            #         system_prompt=request.system_prompt,
+            #         user_prompt=request.user_prompt,
+            #         pydantic_json_schema=request.metadata['pydantic_json_schema']
+
+            #     )
+            # else:
+            #     response, response_returned = await call_ollama(
+            #         system_prompt=request.system_prompt,
+            #         user_prompt=request.user_prompt
+            #     )
+            
             if request.metadata and 'pydantic_json_schema' in request.metadata:
-                response, response_returned = await call_ollama(
+                response, response_returned = await call_bedrock(
                     system_prompt=request.system_prompt,
                     user_prompt=request.user_prompt,
                     pydantic_json_schema=request.metadata['pydantic_json_schema']
 
                 )
             else:
-                response, response_returned = await call_ollama(
+                response, response_returned = await call_bedrock(
                     system_prompt=request.system_prompt,
                     user_prompt=request.user_prompt
                 )

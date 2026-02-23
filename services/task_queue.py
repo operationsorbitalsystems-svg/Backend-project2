@@ -345,8 +345,8 @@ class TaskQueueManager:
                 )
                 
                 
-                # REMOVE THIS BEFORE PROD
-                logger.info(f"Worker {worker_id} Liabilities Array is : {liability_ledgers}")
+                # # REMOVE THIS BEFORE PROD
+                # logger.info(f"Worker {worker_id} Liabilities Array is : {liability_ledgers}")
 
                 
                 # === STEP 2c: TDS Prep ===
@@ -361,8 +361,8 @@ class TaskQueueManager:
                     
                 )
                 
-                #REMOVE THIS BEFORE PROD
-                logger.info(f"Worker {worker_id} TDS Set is : {tds_set}")
+                # #REMOVE THIS BEFORE PROD
+                # logger.info(f"Worker {worker_id} TDS Set is : {tds_set}")
                
 
                 # === STEP 3: Enqueue BOTH(+ TDS) Ollama Tasks (NON-BLOCKING) ===

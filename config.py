@@ -17,9 +17,11 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 MAX_MAIN_WORKERS = int(os.getenv("MAX_MAIN_WORKERS", "100"))
 MAX_MISTRAL_CONCURRENT = int(os.getenv("MAX_MISTRAL_CONCURRENT", "5"))
 MAX_OLLAMA_CONCURRENT_CALLS = int(os.getenv("MAX_OLLAMA_CONCURRENT_CALLS", "3"))
+MAX_BEDROCK_CONCURRENT_CALLS = int(os.getenv("MAX_BEDROCK_CONCURRENT_CALLS", "5"))
 
 mistral_semaphore = asyncio.Semaphore(MAX_MISTRAL_CONCURRENT)
 ollama_semaphore = asyncio.Semaphore(MAX_OLLAMA_CONCURRENT_CALLS)
+bedrock_semaphore = asyncio.Semaphore(MAX_BEDROCK_CONCURRENT_CALLS)
 
 # Mistral AI
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
@@ -63,3 +65,9 @@ PORT = int(os.getenv("PORT", "8000"))
 TEMP_STORAGE_PATH = "/tmp/invoice_uploads"
 
 TDS_FILE_PATH = os.getenv("TDS_FILE_PATH", "./data/tds_rates.json")
+
+
+AWS_REGION=os.getenv("AWS_REGION","ap-south-1")
+
+BEDROCK_MODEL_ID=os.getenv("BEDROCK_MODEL_ID","google.gemma-3-12b-it")
+

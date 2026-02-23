@@ -189,9 +189,6 @@ async def health_check_ollama() -> Tuple[bool, Optional[str]]:
         # and use dot notation to get the '.model' attribute from each entry
         model_names = [m.model for m in models_response.models]
         
-        print(model_names)
-        
-        print(OLLAMA_MODEL_NAME)
         
         if OLLAMA_MODEL_NAME not in model_names:
             return False, f"Model '{OLLAMA_MODEL_NAME}' not found. Available: {model_names}"

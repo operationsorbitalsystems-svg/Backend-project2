@@ -28,16 +28,16 @@ class TDSManager:
             return self.data
             
         except (json.JSONDecodeError, FileNotFoundError) as e:
-            print(f"Error loading JSON data: {e}")
+            logger.error(f"Error loading JSON data: {e}")
             return []
 
     def get_all_transaction_natures(self) -> Set[str]:
         """Returns a single list of all 'nature_of_transaction' values."""
         try:
-            logger.info(f"{self.data}, {[item for item in self.data]}")
+            # logger.info(f"{self.data}, {[item for item in self.data]}")
             return set([item['nature_of_transaction'] for item in self.data])
         except KeyError as e:
-            print(f"Data mapping error: Missing key {e}")
+            logger.error(f"Data mapping error: Missing key {e}")
             return []
 
     def get_transaction_by_nature(self, nature_name: str) -> Optional[TDSRate]:
@@ -50,30 +50,30 @@ class TDSManager:
                     return item
             return None
         except Exception as e:
-            print(f"An unexpected error occurred during search: {e}")
+            logger.error(f"An unexpected error occurred during search: {e}")
             return None
 
 MANAGER = TDSManager(TDS_FILE_PATH)
 
 
-# --- Example Usage ---
-if __name__ == "__main__":
-    # Define the path to your data
+# # --- Example Usage ---
+# if __name__ == "__main__":
+#     # Define the path to your data
 
     
-    # 1. Load the data
-    MANAGER.load_data()
+#     # 1. Load the data
+#     MANAGER.load_data()
 
-    # 2. Get all names
-    all_names = MANAGER.get_all_transaction_natures()
-    print(f"Loaded {len(all_names)} transaction types.")
-    print(all_names)
+#     # 2. Get all names
+#     all_names = MANAGER.get_all_transaction_natures()
+#     print(f"Loaded {len(all_names)} transaction types.")
+#     print(all_names)
 
-    # 3. Search for a specific one
-    query = "Dividends"
-    result = MANAGER.get_transaction_by_nature(query)
+#     # 3. Search for a specific one
+#     query = "Dividends"
+#     result = MANAGER.get_transaction_by_nature(query)
     
-    if result:
-        print(f"Found Section: {result['section']} for {query}")
-    else:
-        print(f"No details found for: {query}")
+#     if result:
+#         print(f"Found Section: {result['section']} for {query}")
+#     else:
+#         print(f"No details found for: {query}")
