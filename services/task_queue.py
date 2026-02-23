@@ -13,7 +13,7 @@ from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
 from services.llm_queue import get_llm_queue
-from utils.logger import setup_logger
+from utils.logger import setup_logger, batch_id_var
 from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_expense_leaf_nodes, tds_nature_prompt                                  
 import re
 from utils.coa_tree_traversal import find_matching_non_leaf_node, extract_leaf_nodes
@@ -232,6 +232,7 @@ class TaskQueueManager:
         logger.info(f"Worker {worker_id} started")
 
         while True:
+            _ctx_token = None
             try:
                 # Get next task (round-robin)
                 task = await self.get_next_task_round_robin()
@@ -240,6 +241,8 @@ class TaskQueueManager:
                     # No tasks available, wait briefly
                     await asyncio.sleep(1)
                     continue
+
+                _ctx_token = batch_id_var.set(task.batch_id)
 
                 logger.info(
                     f"Worker {worker_id} processing {task.filename} "
@@ -573,6 +576,10 @@ class TaskQueueManager:
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
 
                 await asyncio.sleep(1)
+
+            finally:
+                if _ctx_token is not None:
+                    batch_id_var.reset(_ctx_token)
                 
 
     def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str], worker_id: str = None, get_pydantic_schema: BaseModel = None) -> Tuple[str, float]:

@@ -15,7 +15,7 @@ from uuid import uuid4
 from config import redis_client
 from models import OllamaRequest, OllamaResponse
 from services.llm_client import call_llm
-from utils.logger import setup_logger
+from utils.logger import setup_logger, batch_id_var
 
 logger = setup_logger()
 
@@ -147,12 +147,15 @@ class LLMQueue:
         logger.info("🚀 LLM queue worker started")
 
         while True:
+            _ctx_token = None
             try:
                 request = await self.get_next_task_round_robin()
 
                 if request is None:
                     await asyncio.sleep(1)
                     continue
+
+                _ctx_token = batch_id_var.set(request.batch_id)
 
                 processing_key = f"{self.PROCESSING_PREFIX}{request.task_id}"
                 await self.redis.setex(processing_key, 3600, request.model_dump_json())
@@ -170,6 +173,10 @@ class LLMQueue:
             except Exception as e:
                 logger.error(f"❌ LLM worker error: {str(e)}")
                 await asyncio.sleep(5)
+
+            finally:
+                if _ctx_token is not None:
+                    batch_id_var.reset(_ctx_token)
 
     async def wait_for_response(self, task_id: str, timeout: int = 60) -> OllamaResponse:
         response_key = f"{self.RESPONSE_PREFIX}{task_id}"

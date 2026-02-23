@@ -7,9 +7,6 @@ import redis.asyncio as redis
 
 load_dotenv()
 
-
-
-
 # API & Server
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -72,4 +69,11 @@ AWS_REGION=os.getenv("AWS_REGION","ap-south-1")
 BEDROCK_MODEL_ID=os.getenv("BEDROCK_MODEL_ID","google.gemma-3-12b-it")
 
 LLM_PROVIDER=os.getenv("LLM_PROVIDER","bedrock")
+
+# ── Logging / CloudWatch ──────────────────────────────────────────────────────
+ENVIRONMENT            = os.getenv("ENVIRONMENT", "dev")
+SERVICE_NAME           = os.getenv("SERVICE_NAME", "invoice-parser")
+LOG_CLOUDWATCH_ENABLED = os.getenv("LOG_CLOUDWATCH_ENABLED", "false").lower() == "true"
+LOG_FILE_ENABLED       = os.getenv("LOG_FILE_ENABLED", "true").lower() == "true"
+CW_LOG_GROUP           = os.getenv("CW_LOG_GROUP", "/invoice-parser/app")
 

@@ -1,12 +1,18 @@
 import asyncio
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from typing import List
 from datetime import datetime
 import logging
 
+# ── Logging must be configured FIRST, before any service module imports ───────
 from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT, MAX_MAIN_WORKERS, redis_client
-from utils.logger import setup_logger
+from utils.logger import configure_logging, setup_logger, batch_id_var
+
+configure_logging(debug=DEBUG)
+
 from utils.tds import MANAGER
 from models import (
     SessionCreateResponse, BatchStatusResponse, UploadResponse,
@@ -22,8 +28,7 @@ from services.llm_queue import get_llm_queue
 from services.ollama_api_call import health_check_ollama
 from coa_parser import parse_coa
 import json
-# Setup logger
-logger = setup_logger(debug=DEBUG)
+logger = setup_logger()
 
 # FastAPI app
 app = FastAPI(
@@ -40,6 +45,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class BatchIdMiddleware(BaseHTTPMiddleware):
+    """Sets batch_id_var for the duration of any request that has a batch_id path param."""
+    async def dispatch(self, request: Request, call_next):
+        batch_id = request.path_params.get("batch_id")
+        if batch_id:
+            token = batch_id_var.set(batch_id)
+            try:
+                return await call_next(request)
+            finally:
+                batch_id_var.reset(token)
+        return await call_next(request)
+
+app.add_middleware(BatchIdMiddleware)
 
 # Initialize services
 session_manager = get_session_manager()

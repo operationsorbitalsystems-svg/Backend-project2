@@ -13,7 +13,7 @@ from typing import Optional
 import aiofiles
 
 from models import MistralRequest, MistralResponse, InvoiceData
-from utils.logger import setup_logger
+from utils.logger import setup_logger, batch_id_var
 
 logger = setup_logger()
 
@@ -157,6 +157,7 @@ class MistralQueueManager:
         logger.info(f"Mistral worker {worker_id} started")
 
         while self.running:
+            _ctx_token = None
             try:
                 # Get next task
                 task = await self.get_next_task_round_robin()
@@ -165,6 +166,8 @@ class MistralQueueManager:
                     # No tasks available, wait briefly
                     await asyncio.sleep(1)
                     continue
+
+                _ctx_token = batch_id_var.set(task.batch_id)
 
                 logger.info(
                     f"Mistral worker {worker_id} processing {task.filename} "
@@ -296,6 +299,10 @@ class MistralQueueManager:
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
 
                 await asyncio.sleep(1)
+
+            finally:
+                if _ctx_token is not None:
+                    batch_id_var.reset(_ctx_token)
 
     async def wait_for_response(self, task_id: str, timeout: int = 120) -> MistralResponse:
         """
