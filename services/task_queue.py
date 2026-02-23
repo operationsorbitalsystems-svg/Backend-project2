@@ -12,7 +12,7 @@ from services.session_manager import get_session_manager
 from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
-from services.ollama_queue import get_ollama_queue_manager
+from services.llm_queue import get_llm_queue
 from utils.logger import setup_logger
 from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_expense_leaf_nodes, tds_nature_prompt                                  
 import re
@@ -32,7 +32,7 @@ class TaskQueueManager:
     in round-robin fashion, preventing any single user from monopolizing workers.
     """
 
-    def __init__(self, redis_client, mistral_queue, ollama_queue=None, session_manager=None, file_handler=None):
+    def __init__(self, redis_client, mistral_queue, llm_queue=None, session_manager=None, file_handler=None):
         if redis_client is None:
             raise ValueError("Redis client is required for task queue. Set REDIS_ENABLED=true")
 
@@ -41,7 +41,7 @@ class TaskQueueManager:
         self.session_manager = session_manager if session_manager is not None else get_session_manager()
         self.invoice_parser = InvoiceParser()
         self.file_handler = file_handler if file_handler is not None else FileHandler()
-        self.ollama_queue = ollama_queue if ollama_queue is not None else get_ollama_queue_manager()
+        self.llm_queue = llm_queue if llm_queue is not None else get_llm_queue()
 
         # Redis key patterns
         self.PENDING_QUEUE_PREFIX = "queue:pending:"
@@ -366,7 +366,7 @@ class TaskQueueManager:
                
 
                 # === STEP 3: Enqueue BOTH(+ TDS) Ollama Tasks (NON-BLOCKING) ===
-                expense_task_id = await self.ollama_queue.enqueue_request(
+                expense_task_id = await self.llm_queue.enqueue_request(
                     batch_id=task.batch_id,
                     system_prompt=expense_system_prompt,
                     user_prompt=expense_user_prompt,
@@ -377,7 +377,7 @@ class TaskQueueManager:
                     }
                 )
 
-                vendor_task_id = await self.ollama_queue.enqueue_request(
+                vendor_task_id = await self.llm_queue.enqueue_request(
                     batch_id=task.batch_id,
                     system_prompt=vendor_system_prompt,
                     user_prompt=vendor_user_prompt,
@@ -388,7 +388,7 @@ class TaskQueueManager:
                     }
                 )
                 
-                tds_task_id = await self.ollama_queue.enqueue_request(
+                tds_task_id = await self.llm_queue.enqueue_request(
                     batch_id=task.batch_id,
                     system_prompt=tds_system_prompt,
                     user_prompt=tds_user_prompt,
@@ -402,9 +402,9 @@ class TaskQueueManager:
                 # === STEP 4: Wait for BOTH Ollama Results in Parallel ===
                 # Use gather with return_exceptions=True to handle individual failures
                 results = await asyncio.gather(
-                    self.ollama_queue.wait_for_response(expense_task_id, timeout=60),
-                    self.ollama_queue.wait_for_response(vendor_task_id, timeout=60),
-                    self.ollama_queue.wait_for_response(tds_task_id, timeout=60),
+                    self.llm_queue.wait_for_response(expense_task_id, timeout=60),
+                    self.llm_queue.wait_for_response(vendor_task_id, timeout=60),
+                    self.llm_queue.wait_for_response(tds_task_id, timeout=60),
                     return_exceptions=True
                 )
 

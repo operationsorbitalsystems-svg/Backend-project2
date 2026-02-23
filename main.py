@@ -18,7 +18,7 @@ from services.file_handler import FileHandler
 from services.invoice_parser import InvoiceParser
 from services.task_queue import TaskQueueManager
 from services.mistral_queue import MistralQueueManager
-from services.ollama_queue import get_ollama_queue_manager
+from services.llm_queue import get_llm_queue
 from services.ollama_api_call import health_check_ollama
 from coa_parser import parse_coa
 import json
@@ -53,14 +53,14 @@ mistral_queue = MistralQueueManager(
     file_handler=file_handler
 )
 
-# Initialize Ollama queue
-ollama_queue = get_ollama_queue_manager()
+# Initialize LLM queue
+llm_queue = get_llm_queue()
 
 # Initialize main task queue
 task_queue = TaskQueueManager(
     redis_client=redis_client,
     mistral_queue=mistral_queue,
-    ollama_queue=ollama_queue,
+    llm_queue=llm_queue,
     session_manager=session_manager,
     file_handler=file_handler
 )
@@ -525,11 +525,11 @@ async def startup_event():
     await task_queue.start_workers(num_workers=MAX_MAIN_WORKERS)
     logger.info(f"✅ Started {MAX_MAIN_WORKERS} main task queue workers")
 
-    # Start Ollama worker pool
+    # Start LLM worker pool
     from config import MAX_OLLAMA_CONCURRENT_CALLS
     for i in range(MAX_OLLAMA_CONCURRENT_CALLS):
-        asyncio.create_task(ollama_queue.worker_loop())
-    logger.info(f"✅ Started {MAX_OLLAMA_CONCURRENT_CALLS} Ollama workers")
+        asyncio.create_task(llm_queue.worker_loop())
+    logger.info(f"✅ Started {MAX_OLLAMA_CONCURRENT_CALLS} LLM workers")
 
     # Start background cleanup task
     asyncio.create_task(cleanup_old_batches())

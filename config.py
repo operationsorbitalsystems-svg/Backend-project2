@@ -71,3 +71,5 @@ AWS_REGION=os.getenv("AWS_REGION","ap-south-1")
 
 BEDROCK_MODEL_ID=os.getenv("BEDROCK_MODEL_ID","google.gemma-3-12b-it")
 
+LLM_PROVIDER=os.getenv("LLM_PROVIDER","bedrock")
+

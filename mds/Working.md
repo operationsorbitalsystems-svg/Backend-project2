@@ -14,18 +14,18 @@ Module load (before startup_event):
   file_handler     = FileHandler()
   invoice_parser   = InvoiceParser()
   mistral_queue    = MistralQueueManager(redis_client, invoice_parser, file_handler)
-  ollama_queue     = get_ollama_queue_manager() # GenericOllamaQueue singleton
-  task_queue       = TaskQueueManager(redis_client, mistral_queue, ollama_queue,
+  llm_queue        = get_llm_queue()            # LLMQueue singleton
+  task_queue       = TaskQueueManager(redis_client, mistral_queue, llm_queue,
                                       session_manager, file_handler)
 
 startup_event():
-  1. health_check_ollama()                   # HTTP GET to http://localhost:11434
+  1. health_check_bedrock()                  # Converse API test call
   2. MANAGER.load_data()                     # Load data/tds_rates.json into memory
   3. task_queue.recover_crashed_tasks()      # SCAN queue:processing:* → mark failed
   4. mistral_queue.recover_crashed_tasks()   # SCAN mistral_queue:processing:* → mark failed
   5. mistral_queue.start_workers(5)          # → 5 asyncio tasks
   6. task_queue.start_workers(100)           # → 100 asyncio tasks
-  7. for i in range(3): ollama_queue.worker_loop()  # → 3 asyncio tasks
+  7. for i in range(3): llm_queue.worker_loop()  # → 3 asyncio tasks
   8. cleanup_old_batches()                   # → 1 asyncio task (runs every 1h)
 ```
 
@@ -37,24 +37,49 @@ startup_event():
 |-------|------:|-------|----------------|
 | `TaskQueueManager` | **100** | `worker_loop(worker_id)` | `queue:pending:{batch_id}` |
 | `MistralQueueManager` | **5** | `worker_loop(worker_id)` | `mistral_queue:pending:{batch_id}` |
-| `GenericOllamaQueue` | **3** | `worker_loop()` | `ollama_queue:pending:{batch_id}` |
+| `LLMQueue` | **3** | `worker_loop()` | `llm_queue:pending:{batch_id}` |
 | cleanup | 1 | `cleanup_old_batches()` | — |
 
 **Total: 109 long-running asyncio tasks**, all started at startup. They loop forever (poll → sleep(1) when empty).
 
-The 100 main workers and 3 Ollama workers aren't tracked (fire-and-forget `asyncio.create_task`).
+The 100 main workers and 3 LLM workers aren't tracked (fire-and-forget `asyncio.create_task`).
 The 5 Mistral workers are tracked in `self.workers` list and stopped gracefully on shutdown.
 
 ### Rate-Limiting (semaphores in config.py)
 ```python
 mistral_semaphore = asyncio.Semaphore(5)   # Max 5 concurrent Mistral API calls
-ollama_semaphore  = asyncio.Semaphore(3)   # Max 3 concurrent Ollama HTTP calls
+bedrock_semaphore = asyncio.Semaphore(5)   # Max 5 concurrent Bedrock API calls
+ollama_semaphore  = asyncio.Semaphore(3)   # Max 3 concurrent Ollama HTTP calls (if used)
 ```
-These are separate from worker counts — they gate the actual external API calls inside the workers.
+These gate the actual external API calls inside the provider modules, independent of worker counts.
 
 ---
 
-## 3. Request Flow: `POST /api/sessions`
+## 3. LLM Provider System
+
+The LLM queue is provider-agnostic. The active provider is controlled by a single env var:
+
+```
+LLM_PROVIDER=bedrock    # default
+LLM_PROVIDER=ollama
+LLM_PROVIDER=openai     # add to llm_client.py to enable
+```
+
+```
+services/
+  llm_client.py        ← dispatcher: call_llm(system, user, json_schema) → (str, bool)
+  bedrock.py           ← AWS Bedrock via Converse API → (str, bool)
+  ollama_api_call.py   ← local Ollama → (str, bool)
+  llm_queue.py         ← queue, calls call_llm(), knows nothing about provider
+```
+
+Every provider normalizes its return to `(str, bool)` — response text + success flag. No dicts.
+
+To add a new provider: create `services/<name>.py` returning `(str, bool)`, add one `elif` in `llm_client.py`.
+
+---
+
+## 4. Request Flow: `POST /api/sessions`
 
 ```
 Client → FastAPI → session_manager.create_session()
@@ -65,7 +90,7 @@ Session stored in Redis as a hash with 4h TTL. No workers involved.
 
 ---
 
-## 4. Request Flow: `POST /api/sessions/{batch_id}/upload`
+## 5. Request Flow: `POST /api/sessions/{batch_id}/upload`
 
 Receives: 1 COA PDF + N invoice PDFs (max 20).
 
@@ -92,7 +117,7 @@ At this point the HTTP request is done. Everything else is async background.
 
 ---
 
-## 5. Task Flow: `TaskQueueManager.worker_loop` (100 workers)
+## 6. Task Flow: `TaskQueueManager.worker_loop` (100 workers)
 
 One of the 100 idle workers wakes and picks up the task:
 
@@ -138,13 +163,13 @@ STEP 6: Prepare 3 prompts
   ledger_name_prompt_cr(vendor_name, narration, creditor_ledgers) # Cr: vendor selection
   tds_nature_prompt(vendor_name, narration, tds_options)          # TDS nature
 
-STEP 7: Enqueue all 3 to Ollama queue (NON-BLOCKING)
-  ollama_queue.enqueue_request(expense_...)   → redis.rpush("ollama_queue:pending:{batch_id}", ...)
-  ollama_queue.enqueue_request(vendor_...)    → redis.rpush("ollama_queue:pending:{batch_id}", ...)
-  ollama_queue.enqueue_request(tds_...)       → redis.rpush("ollama_queue:pending:{batch_id}", ...)
+STEP 7: Enqueue all 3 to LLM queue (NON-BLOCKING)
+  llm_queue.enqueue_request(expense_...)  → redis.rpush("llm_queue:pending:{batch_id}", ...)
+  llm_queue.enqueue_request(vendor_...)   → redis.rpush("llm_queue:pending:{batch_id}", ...)
+  llm_queue.enqueue_request(tds_...)      → redis.rpush("llm_queue:pending:{batch_id}", ...)
 
 STEP 8: asyncio.gather(wait_for_response × 3, timeout=60 each)
-  → polls redis.get("ollama_queue:response:{task_id}") every 500ms for each
+  → polls redis.get("llm_queue:response:{task_id}") every 500ms for each
   [BLOCKING on all 3 simultaneously — up to 60 seconds]
   ← (expense_response, vendor_response, tds_response)
 
@@ -178,7 +203,7 @@ STEP 15: redis.delete("queue:processing:{task_id}")
 
 ---
 
-## 6. Task Flow: `MistralQueueManager.worker_loop` (5 workers)
+## 7. Task Flow: `MistralQueueManager.worker_loop` (5 workers)
 
 Triggered by Step 2 above. One of 5 Mistral workers picks it up:
 
@@ -210,49 +235,62 @@ redis.delete("mistral_queue:processing:{task_id}")
 
 ---
 
-## 7. Task Flow: `GenericOllamaQueue.worker_loop` (3 workers)
+## 8. Task Flow: `LLMQueue.worker_loop` (3 workers)
 
-Triggered by Step 7 above. One of 3 Ollama workers picks up each task:
+Triggered by Step 7 above. One of 3 LLM workers picks up each task:
 
 ```
 get_next_task_round_robin()
-  → redis.smembers("ollama_queue:active_batches")
-  → redis.lpop("ollama_queue:pending:{batch_id}")
-  → redis.setex("ollama_queue:processing:{task_id}", 3600, ...)
+  → redis.smembers("llm_queue:active_batches")
+  → redis.lpop("llm_queue:pending:{batch_id}")
+  → redis.setex("llm_queue:processing:{task_id}", 3600, ...)
 
-call_ollama_and_respond(request)
-  → call_ollama(system_prompt, user_prompt, pydantic_json_schema)
-    [ACTUAL OLLAMA API CALL — 1 local HTTP call]
-    → ollama_semaphore (max 3 concurrent)
-    → HTTP POST to http://localhost:11434/api/chat
-    → model: gemma2:2b, temperature: 0.1, format: json schema
-    → Retry up to 3 times (backoff)
-    ← raw ChatResponse
-  → extract JSON from response (strip markdown, fix unquoted keys)
-  ← OllamaResponse(response_text="{\"ledger\": \"...\"}")
+call_llm_and_respond(request)
+  → llm_client.call_llm(system_prompt, user_prompt, pydantic_json_schema)
+    [dispatches based on LLM_PROVIDER env var]
 
-redis.setex("ollama_queue:response:{task_id}", 3600, OllamaResponse JSON)
+    LLM_PROVIDER=bedrock:
+      → bedrock_semaphore (max 5 concurrent)
+      → bedrock_client.converse() — AWS Bedrock Converse API
+      → model: BEDROCK_MODEL_ID (default: google.gemma-3-12b-it)
+      → Retry up to 3 times (backoff)
+      ← str (response text)
+
+    LLM_PROVIDER=ollama:
+      → ollama_semaphore (max 3 concurrent)
+      → HTTP POST to http://localhost:11434/api/chat
+      → model: OLLAMA_MODEL_NAME (default: gemma2:2b)
+      → Retry up to 3 times (backoff)
+      ← str (response text)
+
+  → Extract JSON from response string (strip markdown fences, preamble)
+  → Fix malformed JSON if needed
+  ← OllamaResponse(response_text='{"ledger": "..."}', success=True)
+
+redis.setex("llm_queue:response:{task_id}", 3600, OllamaResponse JSON)
   [this is what the main worker is polling for × 3]
 
-redis.delete("ollama_queue:processing:{task_id}")
+redis.delete("llm_queue:processing:{task_id}")
 ```
 
 ---
 
-## 8. API Calls Per Invoice (Summary)
+## 9. API Calls Per Invoice (Summary)
 
 | # | Service | Who calls it | Notes |
 |---|---------|-------------|-------|
 | 1 | **Mistral AI** (remote) | `MistralQueueManager.worker_loop` | OCR/extraction, up to 4 retries |
-| 2 | **Ollama** (local) | `GenericOllamaQueue.worker_loop` | Expense ledger selection |
-| 3 | **Ollama** (local) | `GenericOllamaQueue.worker_loop` | Vendor/creditor selection |
-| 4 | **Ollama** (local) | `GenericOllamaQueue.worker_loop` | TDS nature of transaction |
+| 2 | **LLM provider** (configurable) | `LLMQueue.worker_loop` | Expense ledger selection |
+| 3 | **LLM provider** (configurable) | `LLMQueue.worker_loop` | Vendor/creditor selection |
+| 4 | **LLM provider** (configurable) | `LLMQueue.worker_loop` | TDS nature of transaction |
 
-**Total: 4 API calls per invoice** (1 remote + 3 local LLM)
+**Total: 4 API calls per invoice** (1 Mistral + 3 LLM)
+
+LLM provider is set via `LLM_PROVIDER` env var (`bedrock` by default).
 
 ---
 
-## 9. Redis Keys Reference
+## 10. Redis Keys Reference
 
 ```
 # Session data
@@ -272,17 +310,17 @@ mistral_queue:round_robin_index           → integer
 mistral_queue:processing:{task_id}        → MistralRequest JSON (1h TTL)
 mistral_queue:response:{task_id}          → MistralResponse JSON (1h TTL)
 
-# Ollama queue
-ollama_queue:pending:{batch_id}            → list of OllamaRequest JSON
-ollama_queue:active_batches               → set
-ollama_queue:round_robin_index            → integer
-ollama_queue:processing:{task_id}         → OllamaRequest JSON (1h TTL)
-ollama_queue:response:{task_id}           → OllamaResponse JSON (1h TTL)
+# LLM queue
+llm_queue:pending:{batch_id}              → list of OllamaRequest JSON
+llm_queue:active_batches                  → set
+llm_queue:round_robin_index               → integer
+llm_queue:processing:{task_id}            → OllamaRequest JSON (1h TTL)
+llm_queue:response:{task_id}              → OllamaResponse JSON (1h TTL)
 ```
 
 ---
 
-## 10. Polling: How Workers Wake Up
+## 11. Polling: How Workers Wake Up
 
 None of the workers use Redis pub/sub or blocking pops (`BLPOP`). They all use busy-wait polling:
 
@@ -306,7 +344,7 @@ while elapsed < timeout:
 
 ---
 
-## 11. Full Timeline for 1 Invoice (happy path)
+## 12. Full Timeline for 1 Invoice (happy path)
 
 ```
 t=0s    Upload received
@@ -326,13 +364,13 @@ t≈30s   Mistral worker saves invoice.json to disk
 
 t≈30s   Main worker sees response, reads invoice.json from disk
         Loads COA json from disk (expense leaves, creditor leaves)
-        Pushes 3 OllamaRequests to ollama_queue:pending:{batch_id}
+        Pushes 3 LLM requests to llm_queue:pending:{batch_id}
         asyncio.gather → polling 3 response keys every 500ms
 
-t≈31s   Ollama workers pick up the 3 tasks (may be sequential if only 3 workers busy)
-        Each calls http://localhost:11434 (~2-10s per call)
+t≈31s   LLM workers pick up the 3 tasks (all 3 in parallel if workers free)
+        Each calls LLM provider via llm_client.call_llm() (~2-10s per call)
 
-t≈45s   All 3 Ollama responses stored in Redis
+t≈45s   All 3 LLM responses stored in Redis
         Main worker receives all 3, parses ledger names with fuzzy match
         Generates voucher number (Redis INCR)
         XLOutputGenerator builds 4-6 rows in memory
@@ -345,7 +383,7 @@ t≈45s   Client polling GET /api/sessions/{batch_id}/status
 
 ---
 
-## 12. Round-Robin Fair Scheduling
+## 13. Round-Robin Fair Scheduling
 
 All 3 queues use the same pattern to prevent any one batch from monopolizing workers:
 

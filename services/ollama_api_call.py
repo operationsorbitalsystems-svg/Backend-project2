@@ -1,7 +1,5 @@
 import ollama
-from ollama import ChatResponse
 import asyncio
-import logging
 from typing import Tuple, Optional, Type, Dict, Any
 from pydantic import BaseModel, Field
 from config import OLLAMA_MODEL_NAME, OLLAMA_BASE_URL, ollama_semaphore
@@ -23,20 +21,14 @@ async def call_ollama(
     user_prompt: str,
     model_name: str = OLLAMA_MODEL_NAME,
     max_retries: int = 3,
-    get_pydantic_schema : Optional[Type[BaseModel]] = None,
+    get_pydantic_schema: Optional[Type[BaseModel]] = None,
     pydantic_json_schema: Optional[Dict[str, Any]] = None
-)-> Tuple[ChatResponse, bool]:
+) -> Tuple[str, bool]:
     """
-    Call Ollama API to select ledger name with retry logic and confidence extraction.
-
-    Args:
-        system_prompt: System instructions
-        user_prompt: User query with invoice context
-        model_name: Ollama model to use (default from config)
-        max_retries: Maximum retry attempts (default: 3)
+    Call Ollama API with retry logic.
 
     Returns:
-        Tuple of (success, ledger_name, confidence_score, error_message)
+        (response_text, success) — normalized (str, bool) for all providers
     """
     global ollama_semaphore
 
@@ -45,98 +37,46 @@ async def call_ollama(
             if attempt > 0:
                 logger.info(f"🔄 Ollama retry {attempt}/{max_retries}")
 
+            json_schema = None
             if get_pydantic_schema or pydantic_json_schema:
-                # Use pre-computed schema if provided, otherwise compute from class
                 json_schema = pydantic_json_schema if pydantic_json_schema else get_pydantic_schema.model_json_schema()
 
-                async with ollama_semaphore:
-                    # Call Ollama chat API
-                    response = await ollama_client.chat(
-                        model=model_name,
-                        messages=[
-                            {
-                                'role': 'system',
-                                'content': system_prompt
-                            },
-                            {
-                                'role': 'user',
-                                'content': user_prompt
-                            }
-                        ],
-                        format=json_schema,
-                        options={
-                            'temperature': 0.1,  # Low temperature for consistent categorization
-                            'top_p': 0.9,
-                        }
-                    )
-                    
-            else:
-                async with ollama_semaphore:
-                    # Call Ollama chat API
-                    response = await ollama_client.chat(
-                        model=model_name,
-                        messages=[
-                            {
-                                'role': 'system',
-                                'content': system_prompt
-                            },
-                            {
-                                'role': 'user',
-                                'content': user_prompt
-                            }
-                        ],
-                        options={
-                            'temperature': 0.1,  # Low temperature for consistent categorization
-                            'top_p': 0.9,
-                        }
-                    )
+            chat_kwargs = dict(
+                model=model_name,
+                messages=[
+                    {'role': 'system', 'content': system_prompt},
+                    {'role': 'user', 'content': user_prompt}
+                ],
+                options={'temperature': 0.1, 'top_p': 0.9}
+            )
+            if json_schema:
+                chat_kwargs['format'] = json_schema
 
-            # Extract ledger name from response
+            async with ollama_semaphore:
+                response = await ollama_client.chat(**chat_kwargs)
+
             if response and 'message' in response and 'content' in response['message']:
-                # # ledger_name = response['message']['content'].strip()
-                # output = response['message']['content']
-                # if get_pydantic_schema:
-                    
-                #     ledger_dictionary = get_pydantic_schema.model_validate_json(output)
-                    
-                #     ledger_name = ledger_dictionary.ledger
-                    
-                # else:
-                #     # Clean up response (remove quotes, newlines, extra spaces)
-                #     ledger_name = output.replace('"', '').replace("'", "").strip()
-
-                # # Extract confidence score from token probabilities (if available)
-                # # Note: Ollama doesn't easily expose token probabilities by default
-                # # We use a placeholder approach: assume high confidence if response is clean
-                # confidence_score = _estimate_confidence(ledger_name, response)
-
-                # # logger.info(f"✅ Ollama selected ledger: {ledger_name} (confidence: {confidence_score:.2f})")
-                # return True, ledger_name, confidence_score, None
-                return response, True
+                return response['message']['content'].strip(), True
             else:
                 raise ValueError("Invalid response format from Ollama")
 
         except Exception as e:
-            # Check if retryable error
             if attempt < max_retries and is_retryable_error(e):
-                wait_time = 2 ** attempt  # Exponential backoff: 1s, 2s, 4s
+                wait_time = 2 ** attempt
                 logger.warning(
                     f"Retryable Ollama error, waiting {wait_time}s before "
                     f"retry {attempt + 1}/{max_retries}: {str(e)}"
                 )
                 await asyncio.sleep(wait_time)
             else:
-                # Final failure or non-retryable error
                 error_msg = str(e)
                 if attempt == max_retries:
                     logger.error(f"❌ Ollama failed after {max_retries} retries: {error_msg}")
                 else:
                     logger.error(f"❌ Non-retryable Ollama error: {error_msg}")
-                return response, False
+                return "", False
 
-
-##FIX THIS LATER
-    return ChatResponse, False
+    return "", False
 
 
 def _estimate_confidence(ledger_name: str, response: dict) -> float:

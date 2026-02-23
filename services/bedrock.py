@@ -1,7 +1,6 @@
 import boto3
 import asyncio
 import json
-import logging
 from typing import Tuple, Optional, Type, Dict, Any
 from pydantic import BaseModel
 
@@ -17,10 +16,6 @@ bedrock_client = boto3.client(
 )
 
 
-class LedgerNameOutputFormat(BaseModel):
-    ledger_name: str
-
-
 async def call_bedrock(
     system_prompt: str,
     user_prompt: str,
@@ -28,55 +23,47 @@ async def call_bedrock(
     max_retries: int = 3,
     get_pydantic_schema: Optional[Type[BaseModel]] = None,
     pydantic_json_schema: Optional[Dict[str, Any]] = None
-) -> Tuple[Optional[dict], bool]:
+) -> Tuple[str, bool]:
+    """
+    Call AWS Bedrock via the Converse API (works for all models: Gemma, Claude, Llama, etc.)
 
+    Returns:
+        (response_text, success) — normalized (str, bool) for all providers
+    """
     global bedrock_semaphore
-    response = None
+
+    # Append JSON schema instruction to user prompt if provided
+    final_user_prompt = user_prompt
+    if get_pydantic_schema or pydantic_json_schema:
+        json_schema = (
+            pydantic_json_schema
+            if pydantic_json_schema
+            else get_pydantic_schema.model_json_schema()
+        )
+        final_user_prompt += f"\n\nReturn strictly valid JSON matching this schema:\n{json.dumps(json_schema)}"
 
     for attempt in range(max_retries + 1):
         try:
             if attempt > 0:
                 logger.info(f"🔄 Bedrock retry {attempt}/{max_retries}")
 
-            # Construct final prompt
-            full_prompt = f"{system_prompt}\n\nUser:\n{user_prompt}"
-
-            if get_pydantic_schema or pydantic_json_schema:
-                json_schema = (
-                    pydantic_json_schema
-                    if pydantic_json_schema
-                    else get_pydantic_schema.model_json_schema()
-                )
-
-                full_prompt += f"\n\nReturn strictly valid JSON matching this schema:\n{json.dumps(json_schema)}"
-
-            request_body = {
-                "inputText": full_prompt,
-                "textGenerationConfig": {
-                    "temperature": 0.1,
-                    "topP": 0.9,
-                    "maxTokenCount": 512
-                }
-            }
-
             async with bedrock_semaphore:
                 raw_response = await asyncio.to_thread(
-                    bedrock_client.invoke_model,
+                    bedrock_client.converse,
                     modelId=model_id,
-                    body=json.dumps(request_body),
-                    contentType="application/json",
-                    accept="application/json"
+                    system=[{"text": system_prompt}],
+                    messages=[
+                        {"role": "user", "content": [{"text": final_user_prompt}]}
+                    ],
+                    inferenceConfig={
+                        "maxTokens": 512,
+                        "temperature": 0.1,
+                        "topP": 0.9
+                    }
                 )
 
-            body = json.loads(raw_response["body"].read())
-
-            # Titan-style response parsing
-            if "results" in body and len(body["results"]) > 0:
-                text_output = body["results"][0]["outputText"].strip()
-                response = {"content": text_output}
-                return response, True
-
-            raise ValueError("Invalid Bedrock response format")
+            text = raw_response["output"]["message"]["content"][0]["text"].strip()
+            return text, True
 
         except Exception as e:
             if attempt < max_retries and is_retryable_error(e):
@@ -88,9 +75,9 @@ async def call_bedrock(
                 await asyncio.sleep(wait_time)
             else:
                 logger.error(f"❌ Bedrock failed: {str(e)}")
-                return response, False
+                return "", False
 
-    return None, False
+    return "", False
 
 
 def is_retryable_error(error: Exception) -> bool:
@@ -109,22 +96,14 @@ def is_retryable_error(error: Exception) -> bool:
 
 async def health_check_bedrock() -> Tuple[bool, Optional[str]]:
     try:
-        # Simple test invoke with minimal prompt
-        test_body = {
-            "inputText": "health check",
-            "textGenerationConfig": {
-                "maxTokenCount": 10
-            }
-        }
-
-        response = await asyncio.to_thread(
-            bedrock_client.invoke_model,
+        await asyncio.to_thread(
+            bedrock_client.converse,
             modelId=BEDROCK_MODEL_ID,
-            body=json.dumps(test_body),
-            contentType="application/json",
-            accept="application/json"
+            messages=[
+                {"role": "user", "content": [{"text": "health check"}]}
+            ],
+            inferenceConfig={"maxTokens": 10}
         )
-
         logger.info("✅ Bedrock health check passed.")
         return True, None
 
