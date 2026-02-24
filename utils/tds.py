@@ -1,7 +1,7 @@
 import json
 from typing import List, Optional, TypedDict, Set
 from utils.logger import setup_logger
-from .safe_file_manager import SafeFileManager, tds_file
+from .safe_file_manager import RedisConfigStore, tds_file
 
 logger = setup_logger()
 
@@ -14,7 +14,7 @@ class TDSRate(TypedDict):
 
 
 class TDSManager:
-    def __init__(self, file_manager: SafeFileManager):
+    def __init__(self, file_manager: RedisConfigStore):
         self.file_manager = file_manager
         self.data: List[TDSRate] = []
 

@@ -18,7 +18,8 @@ from utils.safe_file_manager import dr_prompt_file, cr_prompt_file, tds_prompt_f
 from models import (
     SessionCreateResponse, BatchStatusResponse, UploadResponse,
     FileStatus, ProcessedInvoiceResult,
-    COAStatus, COAMetadata, COAData
+    COAStatus, COAMetadata, COAData,
+    ConfigResponse, ConfigUpdateResponse, TDSRateItem,
 )
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
@@ -403,6 +404,52 @@ async def get_batch_status(batch_id: str):
 
 
 # ============================================================================
+# CONFIG MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@app.get("/api/config", response_model=ConfigResponse, tags=["Config"])
+async def get_config():
+    """Return all 3 prompt files and the TDS rates JSON."""
+    return ConfigResponse(
+        dr_prompt=dr_prompt_file.read(),
+        cr_prompt=cr_prompt_file.read(),
+        tds_prompt=tds_prompt_file.read(),
+        tds_rates=MANAGER.data,
+    )
+
+
+@app.put("/api/config/prompts/dr", response_model=ConfigUpdateResponse, tags=["Config"])
+async def update_dr_prompt(request: Request):
+    """Overwrite the DR (expense ledger) system prompt. Send as text/plain."""
+    content = (await request.body()).decode("utf-8")
+    dr_prompt_file.write(content)
+    return ConfigUpdateResponse(message="DR prompt updated")
+
+
+@app.put("/api/config/prompts/cr", response_model=ConfigUpdateResponse, tags=["Config"])
+async def update_cr_prompt(request: Request):
+    """Overwrite the CR (vendor/creditor ledger) system prompt. Send as text/plain."""
+    content = (await request.body()).decode("utf-8")
+    cr_prompt_file.write(content)
+    return ConfigUpdateResponse(message="CR prompt updated")
+
+
+@app.put("/api/config/prompts/tds", response_model=ConfigUpdateResponse, tags=["Config"])
+async def update_tds_prompt(request: Request):
+    """Overwrite the TDS nature classification system prompt. Send as text/plain."""
+    content = (await request.body()).decode("utf-8")
+    tds_prompt_file.write(content)
+    return ConfigUpdateResponse(message="TDS prompt updated")
+
+
+@app.put("/api/config/tds-rates", response_model=ConfigUpdateResponse, tags=["Config"])
+async def update_tds_rates(rates: List[TDSRateItem]):
+    """Replace the full TDS rates JSON and hot-reload in memory."""
+    MANAGER.save_data([r.model_dump() for r in rates])
+    return ConfigUpdateResponse(message=f"TDS rates updated ({len(rates)} entries)")
+
+
+# ============================================================================
 # BACKGROUND TASKS
 # ============================================================================
 
@@ -530,7 +577,13 @@ async def startup_event():
         logger.error(f"⚠️ Ollama health check failed: {ollama_error}")
         logger.warning("⚠️ Continuing without Ollama - ledger selection will fail!")
 
-    #Loading TDS Json
+    # Seed config into Redis from files (no-op if keys already exist)
+    dr_prompt_file.seed_from_file()
+    cr_prompt_file.seed_from_file()
+    tds_prompt_file.seed_from_file()
+    tds_file.seed_from_file()
+
+    # Load TDS data into memory (reads from Redis via tds_file.read())
     MANAGER.load_data()
 
     # Recover crashed tasks from all queues

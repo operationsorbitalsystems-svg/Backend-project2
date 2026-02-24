@@ -240,6 +240,27 @@ def custom_ledger(leaf_node_list: List[str]):
         raise e
 
 
+# === Config Management Models ===
+
+class TDSRateItem(BaseModel):
+    section: str
+    nature_of_transaction: str
+    threshold_limit: int
+    tds_rate: float
+
+class ConfigResponse(BaseModel):
+    dr_prompt: str
+    cr_prompt: str
+    tds_prompt: str
+    tds_rates: List[TDSRateItem]
+
+class PromptUpdateRequest(BaseModel):
+    content: str
+
+class ConfigUpdateResponse(BaseModel):
+    message: str
+
+
 # === Mistral Queue Models ===
 
 class MistralRequest(BaseModel):
