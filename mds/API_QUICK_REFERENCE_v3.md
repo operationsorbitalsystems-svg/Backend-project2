@@ -1,5 +1,5 @@
-# Invoice Parser API - Quick Reference (v3.0)
-**Updated with XL Output for Journal Entry Import**
+# Invoice Parser API - Quick Reference (v4.0)
+**Updated with XL Output for Journal Entry Import + Config Management (Prompts & TDS Rates)**
 
 ## 🚀 Quick Start
 
@@ -365,6 +365,151 @@ GET /api/sessions/{batch_id}/status
 **Errors:**
 - `404` - Batch not found or expired
 - `500` - Server error
+
+---
+
+### 5️⃣ Config Management (Prompts + TDS Rates)
+
+These endpoints let you read and update the LLM system prompts and TDS rates at runtime.
+Changes are stored in Redis and take effect **immediately** for all new invoices — no restart needed.
+
+---
+
+#### GET `/api/config`
+
+Returns all 3 system prompts and the full TDS rates array.
+
+```http
+GET /api/config
+```
+
+**Response (200):**
+```json
+{
+  "dr_prompt": "<role>You are a Senior Chartered Accountant...</role>",
+  "cr_prompt": "<role>You are a Senior Chartered Accountant...</role>",
+  "tds_prompt": "<role>You are an Indian Tax Compliance Expert...</role>",
+  "tds_rates": [
+    {
+      "section": "194J(b)",
+      "nature_of_transaction": "Fees – All other Professional Services",
+      "threshold_limit": 50000,
+      "tds_rate": 10
+    }
+  ]
+}
+```
+
+---
+
+#### PUT `/api/config/prompts/dr`
+
+Overwrites the **DR (expense ledger)** system prompt. Send as `text/plain` — no JSON encoding needed.
+
+```http
+PUT /api/config/prompts/dr
+Content-Type: text/plain
+```
+
+**Request body:** raw prompt text
+
+**Response (200):**
+```json
+{ "message": "DR prompt updated" }
+```
+
+**cURL:**
+```bash
+curl -X PUT http://localhost:8000/api/config/prompts/dr \
+  -H "Content-Type: text/plain" \
+  --data-binary @prompts/dr_prompt.txt
+```
+
+---
+
+#### PUT `/api/config/prompts/cr`
+
+Overwrites the **CR (vendor/creditor ledger)** system prompt.
+
+```http
+PUT /api/config/prompts/cr
+Content-Type: text/plain
+```
+
+**Response (200):**
+```json
+{ "message": "CR prompt updated" }
+```
+
+---
+
+#### PUT `/api/config/prompts/tds`
+
+Overwrites the **TDS nature classification** system prompt.
+
+```http
+PUT /api/config/prompts/tds
+Content-Type: text/plain
+```
+
+**Response (200):**
+```json
+{ "message": "TDS prompt updated" }
+```
+
+---
+
+#### PUT `/api/config/tds-rates`
+
+Replaces the full TDS rates list. Validates each entry and hot-reloads in memory.
+
+```http
+PUT /api/config/tds-rates
+Content-Type: application/json
+```
+
+**Request body:** JSON array of TDS rate objects
+```json
+[
+  {
+    "section": "194J(b)",
+    "nature_of_transaction": "Fees – All other Professional Services",
+    "threshold_limit": 50000,
+    "tds_rate": 10
+  },
+  {
+    "section": "194I(a)",
+    "nature_of_transaction": "Rent for Plant & Machinery",
+    "threshold_limit": 50000,
+    "tds_rate": 2
+  }
+]
+```
+
+**Response (200):**
+```json
+{ "message": "TDS rates updated (14 entries)" }
+```
+
+**Errors:**
+- `422` - Invalid TDS rate schema (missing required fields)
+
+---
+
+#### How Config Persistence Works
+
+- On **first startup**, prompts and TDS rates are seeded from disk files into Redis (no-op if keys already exist)
+- After that, all reads come from Redis and all API writes go to Redis
+- A `git pull` + server restart does **not** overwrite user customisations — seeding is skipped if Redis keys exist
+- To reset to repo defaults: `redis-cli DEL config:prompt:dr` (or whichever key), then restart
+
+**Redis keys:**
+```
+config:prompt:dr     → DR system prompt text
+config:prompt:cr     → CR system prompt text
+config:prompt:tds    → TDS nature system prompt text
+config:tds_rates     → TDS rates JSON array (string)
+```
 
 ---
 
@@ -786,6 +931,19 @@ VITE_BACKEND_URL=http://localhost:8000
 
 ---
 
+## 🆕 What's New in v4.0
+
+### Config Management APIs ✨
+
+- **`GET /api/config`** — read all 3 LLM system prompts + full TDS rates in one call
+- **`PUT /api/config/prompts/dr|cr|tds`** — update any prompt at runtime (`text/plain` body, no JSON escaping)
+- **`PUT /api/config/tds-rates`** — replace full TDS rates JSON, validated + hot-reloaded instantly
+- **Redis-backed**: prompts and TDS rates stored in Redis at runtime; disk files are seed-only
+- **CI/CD safe**: `git pull` + restart never overwrites user customisations already in Redis
+- **Zero-restart updates**: prompt/rate changes are live immediately for all new invoices
+
+---
+
 ## 🆕 What's New in v3.0
 
 ### XL Output for Journal Entries ✨
@@ -840,6 +998,6 @@ VITE_BACKEND_URL=http://localhost:8000
 
 ---
 
-**Last Updated:** 2026-01-12
-**API Version:** 3.0
-**Backend Version:** With COA Support + XL Output
+**Last Updated:** 2026-02-24
+**API Version:** 4.0
+**Backend Version:** With COA Support + XL Output + Config Management (Redis-backed)

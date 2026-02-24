@@ -20,13 +20,17 @@ Module load (before startup_event):
 
 startup_event():
   1. health_check_bedrock()                  # Converse API test call
-  2. MANAGER.load_data()                     # Load data/tds_rates.json into memory
-  3. task_queue.recover_crashed_tasks()      # SCAN queue:processing:* → mark failed
-  4. mistral_queue.recover_crashed_tasks()   # SCAN mistral_queue:processing:* → mark failed
-  5. mistral_queue.start_workers(5)          # → 5 asyncio tasks
-  6. task_queue.start_workers(100)           # → 100 asyncio tasks
-  7. for i in range(3): llm_queue.worker_loop()  # → 3 asyncio tasks
-  8. cleanup_old_batches()                   # → 1 asyncio task (runs every 1h)
+  2. dr_prompt_file.seed_from_file()         # SET config:prompt:dr  if absent (from prompts/dr_prompt.txt)
+     cr_prompt_file.seed_from_file()         # SET config:prompt:cr  if absent
+     tds_prompt_file.seed_from_file()        # SET config:prompt:tds if absent
+     tds_file.seed_from_file()              # SET config:tds_rates  if absent (from data/tds_rates.json)
+  3. MANAGER.load_data()                     # reads config:tds_rates from Redis → self.data in memory
+  4. task_queue.recover_crashed_tasks()      # SCAN queue:processing:* → mark failed
+  5. mistral_queue.recover_crashed_tasks()   # SCAN mistral_queue:processing:* → mark failed
+  6. mistral_queue.start_workers(5)          # → 5 asyncio tasks
+  7. task_queue.start_workers(100)           # → 100 asyncio tasks
+  8. for i in range(3): llm_queue.worker_loop()  # → 3 asyncio tasks
+  9. cleanup_old_batches()                   # → 1 asyncio task (runs every 1h)
 ```
 
 ---
@@ -156,7 +160,7 @@ STEP 5: Load COA data (synchronous, from disk)
     → regex match "liabilit(y|ies)" → then "creditor(s)?"
     → extract_leaf_nodes()
 
-  MANAGER.get_all_transaction_natures()        # from in-memory tds_rates.json
+  MANAGER.get_all_transaction_natures()        # from in-memory self.data (seeded from Redis at startup)
 
 STEP 6: Prepare 3 prompts
   ledger_name_prompt_dr(narration, expense_ledgers)              # Dr: expense selection
@@ -293,6 +297,12 @@ LLM provider is set via `LLM_PROVIDER` env var (`bedrock` by default).
 ## 10. Redis Keys Reference
 
 ```
+# Config (permanent — no TTL)
+config:prompt:dr                           → DR system prompt text (from prompts/dr_prompt.txt)
+config:prompt:cr                           → CR system prompt text (from prompts/cr_prompt.txt)
+config:prompt:tds                          → TDS nature system prompt text
+config:tds_rates                           → TDS rates JSON array string (from data/tds_rates.json)
+
 # Session data
 session:{batch_id}                         → hash (all session fields)
 
@@ -396,3 +406,53 @@ increment index
 ```
 
 If 3 users each upload 10 invoices simultaneously, their invoices are interleaved (A1, B1, C1, A2, B2, C2...) rather than processing one user's full batch before the next.
+
+---
+
+## 14. Config Store: `RedisConfigStore` (`utils/safe_file_manager.py`)
+
+Replaces the old `SafeFileManager` (filelock + atomic file writes). Same interface — callers unchanged.
+
+```
+utils/safe_file_manager.py
+  RedisConfigStore(redis_client, key, seed_file)
+    .seed_from_file()   → SET key content NX  (only if absent)
+    .read()             → redis.get(key)       (fallback: read seed_file directly)
+    .write(content)     → redis.set(key, content)
+    .exists()           → redis.exists(key)
+
+Global instances:
+  dr_prompt_file  → key="config:prompt:dr",  seed="prompts/dr_prompt.txt"
+  cr_prompt_file  → key="config:prompt:cr",  seed="prompts/cr_prompt.txt"
+  tds_prompt_file → key="config:prompt:tds", seed="prompts/tds_nature_prompt.txt"
+  tds_file        → key="config:tds_rates",  seed="data/tds_rates.json"
+```
+
+**Why Redis instead of files:**
+- Disk files are git-tracked → `git pull` on server would overwrite user-edited prompts
+- Redis keys have no TTL → survive restarts, invisible to git
+- `seed_from_file()` is a no-op if the key exists → deploy + restart never stomps user changes
+- Redis `GET`/`SET` are atomic (single-threaded command loop) → no OS file locks needed
+
+**How prompts reach the LLM:**
+
+```
+prompts/dr_prompt.txt  ──(seed once)──▶  Redis: config:prompt:dr
+                                               │
+PUT /api/config/prompts/dr  ──────────────────▶│ (overwrite)
+                                               │
+                                               ▼
+utils/prompts.py: ledger_name_prompt_dr()
+  template = dr_prompt_file.read()   ← redis.get("config:prompt:dr")
+  system_prompt = template.format(NOT_FOUND=NOT_FOUND)
+  return system_prompt, user_prompt
+                                               │
+                                               ▼
+LLMQueue worker → call_llm(system_prompt, user_prompt, schema)
+```
+
+**To reset a prompt to the repo default:**
+```bash
+redis-cli DEL config:prompt:dr   # delete the key
+# restart server → seed_from_file() re-reads the file
+```
