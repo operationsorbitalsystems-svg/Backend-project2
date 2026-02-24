@@ -14,6 +14,7 @@ from utils.logger import configure_logging, setup_logger, batch_id_var
 configure_logging(debug=DEBUG)
 
 from utils.tds import MANAGER
+from utils.safe_file_manager import dr_prompt_file, cr_prompt_file, tds_prompt_file, tds_file
 from models import (
     SessionCreateResponse, BatchStatusResponse, UploadResponse,
     FileStatus, ProcessedInvoiceResult,

@@ -2,7 +2,8 @@ import os
 import json
 from dotenv import load_dotenv
 import asyncio
-import redis.asyncio as redis
+import redis
+import redis.asyncio as redis_async
 
 
 load_dotenv()
@@ -33,18 +34,48 @@ except json.JSONDecodeError:
 # Session Management
 REDIS_ENABLED = os.getenv("REDIS_ENABLED", "true").lower() == "true"
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
-SESSION_TIMEOUT_HOURS = int(os.getenv("SESSION_TIMEOUT_HOURS", "4"))
-SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
+REDIS_SSL = os.getenv("REDIS_SSL", "false").lower() == "true"
+REDIS_SSL_VERIFY = os.getenv("REDIS_SSL_VERIFY", "true").lower() == "true"
 
 # Initialize Redis client for task queue
 redis_client = None
+redis_sync_client = None
+
+
 if REDIS_ENABLED:
     try:
-        redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+        redis_kwargs = {
+            "decode_responses": True
+        }
+
+        # Only needed if SSL and you want to disable verification
+        if REDIS_URL.startswith("rediss://") and not REDIS_SSL_VERIFY:
+            redis_kwargs["ssl_cert_reqs"] = None
+
+        redis_sync_client = redis.from_url(
+            REDIS_URL,
+            **redis_kwargs
+        )
+
+        redis_client = redis_async.from_url(
+            REDIS_URL,
+            **redis_kwargs
+        )
+
+        print(redis_sync_client.ping())
+
     except Exception as e:
         import logging
         logging.warning(f"Failed to connect to Redis: {e}")
+        
 
+
+
+SESSION_TIMEOUT_HOURS = int(os.getenv("SESSION_TIMEOUT_HOURS", "4"))
+SESSION_TIMEOUT_SECONDS = SESSION_TIMEOUT_HOURS * 3600
+
+
+        
 # File Handling
 MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", "50000000"))  # 50MB per file
 MAX_FILES_PER_BATCH = int(os.getenv("MAX_FILES_PER_BATCH", "20"))

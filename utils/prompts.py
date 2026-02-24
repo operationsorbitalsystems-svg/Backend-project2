@@ -2,6 +2,7 @@ from coa_utils.models import COAOutput
 from models import InvoiceData
 from typing import Tuple, List, Dict, Any
 from config import NOT_FOUND
+from .safe_file_manager import dr_prompt_file, cr_prompt_file, tds_prompt_file
 
 
 def extract_expense_leaf_nodes(coa_hierarchy: Dict[str, Any]) -> List[str]:
@@ -53,42 +54,10 @@ def ledger_name_prompt_dr(
         [f"- {ledger}" for ledger in expense_leaf_nodes]
     )
 
-    system_prompt = f"""
-<role>
-    You are a Senior Chartered Accountant specializing in Tally ERP categorization for Indian businesses. 
-    Your expertise lies in mapping raw invoice descriptions to specific Chart of Accounts (COA) ledgers.
-</role>
-
-<task>
-    Match the provided invoice line item to the MOST appropriate Expense Ledger from the allowed list.
-</task>
-
-<rules>
-    1. STRICT MATCH: Return only the exact string from the provided list.
-    2. SPECIFICITY: Prioritize specific ledgers (e.g., "Microsoft Azure") over generic ones (e.g., "Software Exp").
-    3. SEMANTIC ALIGNMENT: Match the intent of the expense.
-    4. NO_MATCH_PROTOCOL: If no ledger is a clear fit, you must return: {NOT_FOUND}.
-    5. NO INVENTIONS: Do not create, hallucinate, or modify ledger names.
-</rules>
-
-<mapping_guidelines>
-    - Human Resources: Salary, Wages, Stipends.
-    - Digital/SaaS: Software Subscriptions, Cloud Hosting, AWS/Azure.
-    - Infrastructure: Office Rent, Electricity, Water, Repairs.
-    - Professional: Legal Fees, Auditor Fees, Consultancy.
-</mapping_guidelines>
-
-<output_format>
-    Return a valid JSON object only:
-    {{
-        "ledger": "Exact Ledger Name"
-    }}
-    In case of no match:
-    {{
-        "ledger": "{NOT_FOUND}"
-    }}
-</output_format>
-"""
+    template = dr_prompt_file.read()
+    system_prompt = template.format(
+        NOT_FOUND=NOT_FOUND
+    )
 
     user_prompt = f"""
 <input_data>
@@ -118,35 +87,10 @@ def ledger_name_prompt_cr(
         [f"- {ledger}" for ledger in liability_leaf_nodes]
     )
 
-    system_prompt = f"""
-<role>
-    You are an Accounts Payable Specialist. Your goal is to identify the correct Vendor Ledger (Sundry Creditor) for an incoming invoice.
-</role>
-
-<task>
-    Match the 'Vendor Name' or 'Invoice Description' to a ledger from the Liability Chart of Accounts.
-</task>
-
-<matching_logic_hierarchy>
-    1. EXACT MATCH: Look for a case-insensitive exact string match.
-    2. ABBREVIATION/ACRONYM MATCH: Recognize that "XVIPL" may represent "Xpandr Ventures India Private Limited". 
-    3. LOCATION SUFFIX: Recognize that "Vendor Name - [City/Area]" is a common Tally naming convention.
-    4. CONTEXTUAL CLUE: If the vendor name is ambiguous, use the Invoice Description to infer the category.
-</matching_logic_hierarchy>
-
-<rules>
-    - Return ONLY the exact ledger name found in the list.
-    - If no match is found after checking abbreviations and descriptions, return: {NOT_FOUND}.
-    - Do not add explanations or extra text.
-</rules>
-
-<output_format>
-    Return a valid JSON object only:
-    {{
-        "ledger": "Exact Ledger Name"
-    }}
-</output_format>
-"""
+    template = cr_prompt_file.read()
+    system_prompt = template.format(
+        NOT_FOUND=NOT_FOUND
+    )
 
     user_prompt = f"""
 <input_data>
@@ -179,39 +123,10 @@ def tds_nature_prompt(
         [f"- {nature}" for nature in tds_nature_options]
     )
 
-    system_prompt = f"""
-<role>
-    You are an Indian Tax Compliance Expert and Chartered Accountant. 
-    Your task is to determine the "Nature of Transaction" for TDS (Tax Deducted at Source) calculation.
-</role>
-
-<task>
-    Analyze the Vendor Name and Invoice Narration to select the MOST accurate category 
-    from the 'Available TDS Natures' list.
-</task>
-
-<matching_strategy>
-    1. VENDOR CONTEXT: Use the vendor name to infer the business type (e.g., "Pvt Ltd" companies often provide professional services; "Contractors" usually fall under 194C).
-    2. KEYWORD ANALYSIS: Search for trigger words like 'Rent', 'Interest', 'Commission', 'Professional Fees', or 'Technical Services'.
-    3. SUB-SECTION PRECISION: 
-        - Choose 'Rent for Plant & Machinery' for equipment/vehicle hires.
-        - Choose 'Rent of Land Building & Furniture' for office/warehouse space.
-        - Distinguish between 'Technical Services' (194J-a) and 'Professional Services' (194J-b) based on the nature of work.
-</matching_strategy>
-
-<rules>
-    1. STRICT MATCH: Return only the exact string from the provided list.
-    2. NO_MATCH_PROTOCOL: If the data is too vague or doesn't fit a TDS category, return: {not_found_token}.
-    3. NO HALLUCINATIONS: Do not assume a section if the evidence isn't clear in the text.
-</rules>
-
-<output_format>
-    Return a valid JSON object only:
-    {{
-        "nature_of_transaction": "Exact Nature Name"
-    }}
-</output_format>
-"""
+    template = tds_prompt_file.read()
+    system_prompt = template.format(
+        not_found_token=not_found_token
+    )
 
     user_prompt = f"""
 <input_data>

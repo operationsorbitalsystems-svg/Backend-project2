@@ -3,13 +3,11 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 import json
 import logging
-from config import SESSION_TIMEOUT_SECONDS, REDIS_ENABLED, REDIS_URL
+from config import SESSION_TIMEOUT_SECONDS, REDIS_ENABLED, REDIS_URL, redis_sync_client
 
 from utils.logger import setup_logger
 
 logger = setup_logger()
-
-
 
 
 class RedisSessionManager:
@@ -17,9 +15,8 @@ class RedisSessionManager:
     
     def __init__(self):
         try:
-            import redis
-            self.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-            self.redis_client.ping()
+            self.redis_client = redis_sync_client
+            # self.redis_client.ping()
             logger.info("Redis connection established")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
