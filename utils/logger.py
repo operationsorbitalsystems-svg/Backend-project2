@@ -5,7 +5,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-
+from config import AWS_ACCESS_KEY_ID, AWS_REGION, AWS_SECRET_ACCESS_KEY
 
 # ── ContextVar ────────────────────────────────────────────────────────────────
 # Exported so worker loops and request middleware can set it.
@@ -56,7 +56,7 @@ class BatchContextFilter(logging.Filter):
 
 
 # ── CloudWatch Handler Factory ────────────────────────────────────────────────
-def _make_cloudwatch_handler(log_group: str, region: str):
+def _make_cloudwatch_handler(log_group: str, region: str = AWS_REGION):
     """
     Returns a watchtower CloudWatchLogHandler subclass that routes each log
     record to a per-batch_id stream, or "app/general" when no batch context
@@ -65,7 +65,12 @@ def _make_cloudwatch_handler(log_group: str, region: str):
     import boto3
     import watchtower
 
-    boto3_client = boto3.client("logs", region_name=region)
+    boto3_client = boto3.client(
+        "logs",
+        region_name=region,
+        aws_access_key_id=AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=AWS_SECRET_ACCESS_KEY
+    )
 
     class _ContextVarStreamHandler(watchtower.CloudWatchLogHandler):
         def _get_stream_name(self, _message) -> str:

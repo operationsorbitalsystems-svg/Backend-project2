@@ -4,7 +4,7 @@ import json
 from typing import Tuple, Optional, Type, Dict, Any
 from pydantic import BaseModel
 
-from config import BEDROCK_MODEL_ID, AWS_REGION, bedrock_semaphore
+from config import BEDROCK_MODEL_ID, AWS_REGION, bedrock_semaphore, AWS_SECRET_ACCESS_KEY, AWS_ACCESS_KEY_ID
 from utils.logger import setup_logger
 
 logger = setup_logger()
@@ -12,7 +12,9 @@ logger = setup_logger()
 # Singleton Bedrock client
 bedrock_client = boto3.client(
     service_name="bedrock-runtime",
-    region_name=AWS_REGION
+    region_name=AWS_REGION,
+    aws_access_key_id=AWS_ACCESS_KEY_ID,
+    aws_secret_access_key=AWS_SECRET_ACCESS_KEY
 )
 
 

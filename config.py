@@ -96,7 +96,8 @@ TDS_FILE_PATH = os.getenv("TDS_FILE_PATH", "./data/tds_rates.json")
 
 
 AWS_REGION=os.getenv("AWS_DEFAULT_REGION","ap-south-1")
-
+AWS_ACCESS_KEY_ID     = os.getenv("AWS_ACCESS_KEY", "")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRETE_KEY", "")
 BEDROCK_MODEL_ID=os.getenv("BEDROCK_MODEL_ID","google.gemma-3-12b-it")
 
 LLM_PROVIDER=os.getenv("LLM_PROVIDER","bedrock")
