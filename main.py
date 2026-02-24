@@ -36,7 +36,10 @@ logger = setup_logger()
 app = FastAPI(
     title="Invoice Parser API",
     description="High-performance invoice parsing platform",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs" if DEBUG else None,
+    redoc_url="/redoc" if DEBUG else None,
+    openapi_url="/openapi.json" if DEBUG else None,
 )
 
 # # CORS configuration

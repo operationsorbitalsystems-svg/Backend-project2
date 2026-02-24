@@ -1,0 +1,119 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - prod
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          DEBUG: ${{ secrets.DEBUG }}
+          LOG_LEVEL: ${{ secrets.LOG_LEVEL }}
+          LOG_CLOUDWATCH_ENABLED: ${{ secrets.LOG_CLOUDWATCH_ENABLED }}
+          LOG_FILE_ENABLED: ${{ secrets.LOG_FILE_ENABLED }}
+          REDIS_ENABLED: ${{ secrets.REDIS_ENABLED }}
+          REDIS_URL: ${{ secrets.REDIS_URL }}
+          REDIS_SSL: ${{ secrets.REDIS_SSL }}
+          REDIS_SSL_VERIFY: ${{ secrets.REDIS_SSL_VERIFY }}
+          SESSION_TIMEOUT_HOURS: ${{ secrets.SESSION_TIMEOUT_HOURS }}
+          MAX_FILE_SIZE: ${{ secrets.MAX_FILE_SIZE }}
+          OLLAMA_API_KEY: ${{ secrets.OLLAMA_API_KEY }}
+          OLLAMA_BASE_URL: ${{ secrets.OLLAMA_BASE_URL }}
+          OLLAMA_MODEL_NAME: ${{ secrets.OLLAMA_MODEL_NAME }}
+          AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+          AWS_SECRETE_KEY: ${{ secrets.AWS_SECRETE_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
+          AWS_BEDROCK_API_KEY: ${{ secrets.AWS_BEDROCK_API_KEY }}
+          BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ubuntu
+          key: ${{ secrets.SSH_KEY }}
+          envs: MISTRAL_API_KEY,DEBUG,LOG_LEVEL,LOG_CLOUDWATCH_ENABLED,LOG_FILE_ENABLED,REDIS_ENABLED,REDIS_URL,REDIS_SSL,REDIS_SSL_VERIFY,SESSION_TIMEOUT_HOURS,MAX_FILE_SIZE,OLLAMA_API_KEY,OLLAMA_BASE_URL,OLLAMA_MODEL_NAME,AWS_ACCESS_KEY,AWS_SECRETE_KEY,AWS_DEFAULT_REGION,AWS_BEDROCK_API_KEY,BEDROCK_MODEL_ID
+          script: |
+            set -e
+
+            # ── 1. Clone or pull ──────────────────────────────────────────────
+            if [ ! -d /opt/backend ]; then
+              sudo mkdir -p /opt/backend
+              sudo chown ubuntu:ubuntu /opt/backend
+              git clone -b prod git@github.com:operationsorbitalsystems-svg/Backend-project2.git /opt/backend
+            fi
+
+            cd /opt/backend
+            git fetch origin
+            git reset --hard origin/prod
+
+            # ── 2. Virtual environment ────────────────────────────────────────
+            if [ ! -d venv ]; then
+              python3 -m venv venv
+            fi
+
+            # ── 3. Install / update dependencies ─────────────────────────────
+            venv/bin/pip install --upgrade pip --quiet
+            venv/bin/pip install -r requirements.txt --quiet
+
+            # ── 4. Write .env from secrets ────────────────────────────────────
+            {
+              echo "MISTRAL_API_KEY=${MISTRAL_API_KEY}"
+              echo "DEBUG=${DEBUG}"
+              echo "LOG_LEVEL=${LOG_LEVEL}"
+              echo "LOG_CLOUDWATCH_ENABLED=${LOG_CLOUDWATCH_ENABLED}"
+              echo "LOG_FILE_ENABLED=${LOG_FILE_ENABLED}"
+              echo "REDIS_ENABLED=${REDIS_ENABLED}"
+              echo "REDIS_URL=${REDIS_URL}"
+              echo "REDIS_SSL=${REDIS_SSL}"
+              echo "REDIS_SSL_VERIFY=${REDIS_SSL_VERIFY}"
+              echo "SESSION_TIMEOUT_HOURS=${SESSION_TIMEOUT_HOURS}"
+              echo "MAX_FILE_SIZE=${MAX_FILE_SIZE}"
+              echo "OLLAMA_API_KEY=${OLLAMA_API_KEY}"
+              echo "OLLAMA_BASE_URL=${OLLAMA_BASE_URL}"
+              echo "OLLAMA_MODEL_NAME=${OLLAMA_MODEL_NAME}"
+              echo "AWS_ACCESS_KEY=${AWS_ACCESS_KEY}"
+              echo "AWS_SECRETE_KEY=${AWS_SECRETE_KEY}"
+              echo "AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
+              echo "AWS_BEDROCK_API_KEY=${AWS_BEDROCK_API_KEY}"
+              echo "BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID}"
+            } > /opt/backend/.env
+            chmod 600 /opt/backend/.env
+
+            # ── 5. Create systemd service (first deploy only) ─────────────────
+            if [ ! -f /etc/systemd/system/backend.service ]; then
+              sudo tee /etc/systemd/system/backend.service > /dev/null << 'SERVICEEOF'
+            [Unit]
+            Description=Backend FastAPI Service
+            After=network.target
+
+            [Service]
+            User=ubuntu
+            Group=ubuntu
+            WorkingDirectory=/opt/backend
+            EnvironmentFile=/opt/backend/.env
+            ExecStart=/opt/backend/venv/bin/gunicorn \
+                -k uvicorn.workers.UvicornWorker \
+                main:app \
+                --workers 1 \
+                --bind 0.0.0.0:8000
+            Restart=always
+            RestartSec=5
+
+            [Install]
+            WantedBy=multi-user.target
+            SERVICEEOF
+            fi
+
+            # ── 6. Reload daemon and restart service ──────────────────────────
+            sudo systemctl daemon-reload
+            sudo systemctl enable backend
+            sudo systemctl restart backend
+
+            # ── 7. Health check ───────────────────────────────────────────────
+            sleep 5
+            sudo systemctl is-active --quiet backend && echo "Service is running" || (echo "Service failed to start" && sudo journalctl -u backend --no-pager -n 30 && exit 1)
