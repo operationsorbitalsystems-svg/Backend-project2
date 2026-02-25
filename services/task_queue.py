@@ -451,6 +451,7 @@ class TaskQueueManager:
                     logger.error(f"Worker {worker_id} Ollama timeout/error for expense ledger: {task.filename}")
                     expense_ledger_name = NOT_FOUND
                     expense_confidence = 0.0
+                    
                 elif not expense_response.success:
                     logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
                     expense_ledger_name = NOT_FOUND
