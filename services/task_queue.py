@@ -243,6 +243,7 @@ class TaskQueueManager:
                     await asyncio.sleep(1)
                     continue
 
+
                 _ctx_token = batch_id_var.set(task.batch_id)
 
                 logger.info(

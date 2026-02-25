@@ -76,16 +76,8 @@ class InvoiceParser:
         ]
         return any(indicator in error_str for indicator in retryable_indicators)
     
-    async def parse_invoice(self, pdf_path: str) -> Tuple[bool, Optional[InvoiceData], Optional[str]]:
-        """
-        Parse a single invoice PDF using Mistral OCR
-        Returns: (success, invoice_data, error_message)
-        """
-        
-        # Use Mistral API with retry logic
-        return await self.parse_invoice_with_mistral(pdf_path)
     
-    async def parse_invoice_with_mistral(self, pdf_path: str, max_retries: int = 4) -> Tuple[bool, Optional[InvoiceData], Optional[str]]:
+    async def parse_invoice(self, pdf_path: str, max_retries: int = 4) -> Tuple[bool, Optional[InvoiceData], Optional[str]]:
         """
         Parse invoice using actual Mistral OCR API with retry logic
         
