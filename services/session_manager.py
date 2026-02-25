@@ -24,7 +24,7 @@ class RedisSessionManager:
     
     def create_session(self) -> str:
         """Create a new session and return batch_id"""
-        batch_id = str(uuid.uuid4())
+        batch_id = uuid.uuid4().hex
         now = datetime.utcnow()
 
         session_data = {

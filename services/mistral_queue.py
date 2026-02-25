@@ -176,22 +176,32 @@ class MistralQueueManager:
                 )
 
                 # === STEP 1: Call Mistral OCR API ===
-                _trace = langfuse_client.trace(id=task.task_id, session_id=task.batch_id) if langfuse_client else None
-                _ocr_gen = _trace.generation(
-                    name="mistral-ocr",
-                    model="mistral-ocr-latest",
-                    input={"filename": task.filename},
-                ) if _trace else None
+                span = langfuse_client.start_span(
+                    name="mistral_ocr",
+                    trace_context= {
+                        "trace_id": task.task_id
+                    }
+                )
+                
+                span.update(
+                    model= "mistral-ocr-latest",
+                    input={
+                        "filename" : task.filename
+                    }
+                )
+
 
                 success, invoice_data, error, num_of_pages = await self.invoice_parser.parse_invoice(task.pdf_path)
 
-                if _ocr_gen:
-                    _ocr_gen.end(
-                        output=invoice_data.model_dump() if invoice_data else None,
-                        level="ERROR" if not success else "DEFAULT",
-                        metadata={"page_count": num_of_pages, "error": error},
-                    )
+                
+                span.update(
+                    output=invoice_data.model_dump(),
+                    metadata={"page_count": num_of_pages, "error": error},
+                    level="ERROR" if not success else "DEFAULT"
+                )
 
+                span.end()
+                
                 if not success or not invoice_data:
                     # Mistral OCR failed
                     logger.error(f"Mistral worker {worker_id} OCR failed for {task.filename}: {error}")

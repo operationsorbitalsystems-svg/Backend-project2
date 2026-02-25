@@ -20,7 +20,6 @@ from services.ollama_api_call import call_ollama
 from typing import Optional, Dict, Any, Tuple
 from redis import Redis
 from langfuse import observe
-from langfuse.openai import openai
 
 logger = setup_logger()
 
@@ -59,7 +58,7 @@ class LLMQueue:
         logger.info("LLMQueue initialized")
 
 
-
+    @observe
     async def call_llm(
         self,
         system_prompt: str,
@@ -160,13 +159,6 @@ class LLMQueue:
         Call the LLM via llm_client dispatcher and return a normalized OllamaResponse.
         Provider-agnostic: bedrock, ollama, or any future provider all go through call_llm().
         """
-        if langfuse_client:
-            generation_name = request.metadata.get("generation_name", "llm-call") if request.metadata else "llm-call"
-            langfuse_client.update_current_trace(id=request.task_id, session_id=request.batch_id)
-            langfuse_client.update_current_span(
-                name=generation_name,
-                input={"system": request.system_prompt, "user": request.user_prompt},
-            )
 
         try:
             pydantic_json_schema = request.metadata.get('pydantic_json_schema') if request.metadata else None
@@ -230,7 +222,18 @@ class LLMQueue:
                 await self.redis.setex(processing_key, 3600, request.model_dump_json())
 
                 logger.info(f"🤖 Processing LLM task {request.task_id}")
+                
+                span = langfuse_client.start_span(
+                    name="mistral_ocr",
+                    trace_context= {
+                        "trace_id": request.task_id
+                    }
+                )
+
+                
                 response = await self.call_llm_and_respond(request)
+                
+                span.end()
 
                 response_key = f"{self.RESPONSE_PREFIX}{request.task_id}"
                 await self.redis.setex(response_key, 3600, response.model_dump_json())

@@ -233,6 +233,9 @@ async def upload_files(batch_id: str, coa_file: UploadFile = File(...), files: L
         # Create batch directory
         file_handler.create_batch_directory(batch_id)
         
+        
+        logger.debug(f"The batch_id is : {batch_id}")
+        
         # Save files and add to session
         saved_count = 0
         for file in files:

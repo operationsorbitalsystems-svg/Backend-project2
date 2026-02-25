@@ -71,12 +71,12 @@ async def call_bedrock(
             output_tokens = raw_response["usage"]["outputTokens"]
             total_tokens = raw_response["usage"]["totalTokens"]
 
-            print(f"{input_tokens}, {output_tokens}, {total_tokens}")
+            # print(f"{input_tokens}, {output_tokens}, {total_tokens}")
 
             if langfuse_client:
                 langfuse_client.update_current_generation(
                     model=model_id,
-                    usage={"input": input_tokens, "output": output_tokens},
+                    usage_details={"input": input_tokens, "output": output_tokens, "total": total_tokens},
                 )
 
 

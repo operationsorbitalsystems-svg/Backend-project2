@@ -17,10 +17,10 @@ from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_
 import re
 from utils.coa_tree_traversal import find_matching_non_leaf_node, extract_leaf_nodes
 from utils.tds import MANAGER
-from mistral_queue import MistralQueueManager
+from .mistral_queue import MistralQueueManager
 from redis import Redis
-from session_manager import RedisSessionManager
-from llm_queue import LLMQueue
+from .session_manager import RedisSessionManager
+from .llm_queue import LLMQueue
 
 logger = setup_logger()
 
@@ -68,7 +68,7 @@ class TaskQueueManager:
         """
         # Create task item
         task = TaskItem(
-            task_id=str(uuid4()),
+            task_id = uuid4().hex,
             batch_id=batch_id,
             vendor_name=vendor_name,
             filename=filename,
@@ -76,6 +76,8 @@ class TaskQueueManager:
             enqueued_at=datetime.utcnow().isoformat()
         )
 
+        logger.debug(f"Task enqued: task_id : {task.task_id}")
+        
         # Serialize task to JSON
         task_json = task.model_dump_json()
 
@@ -253,12 +255,20 @@ class TaskQueueManager:
                 )
 
                 # === Langfuse: start trace for this invoice ===
+
                 if langfuse_client:
-                    _langfuse_trace = langfuse_client.trace(
-                        id=task.task_id,
-                        session_id=task.batch_id,
+                    trace_id = langfuse_client.create_trace_id(seed=task.task_id)
+                    
+                    logger.debug(f"Trace id : {trace_id}")
+                    
+                    _langfuse_trace = langfuse_client.start_span(
                         name="invoice-processing",
+                        trace_context={"trace_id": trace_id},
                         input={"filename": task.filename},
+                    )
+                    _langfuse_trace.update_trace(
+                        session_id=task.batch_id,
+                        metadata={"worker_id": worker_id, "filename": task.filename}
                     )
 
                 # Update file status to "processing"
@@ -434,7 +444,7 @@ class TaskQueueManager:
                 vendor_response = results[1]
                 tds_response = results[2]
                 
-                logger.info(f"Output For TDS Was : {tds_response}")
+                logger.debug(f"Output For TDS Was : {tds_response}")
 
                 # === STEP 5: Parse Expense Ledger (with fallback) ===
                 if isinstance(expense_response, Exception) or isinstance(expense_response, TimeoutError):
