@@ -15,6 +15,7 @@ from redis import Redis
 from .invoice_parser import InvoiceParser
 from models import MistralRequest, MistralResponse
 from utils.logger import setup_logger, batch_id_var
+from config import langfuse_client
 
 logger = setup_logger()
 
@@ -175,7 +176,21 @@ class MistralQueueManager:
                 )
 
                 # === STEP 1: Call Mistral OCR API ===
-                success, invoice_data, error = await self.invoice_parser.parse_invoice(task.pdf_path)
+                _trace = langfuse_client.trace(id=task.task_id, session_id=task.batch_id) if langfuse_client else None
+                _ocr_gen = _trace.generation(
+                    name="mistral-ocr",
+                    model="mistral-ocr-latest",
+                    input={"filename": task.filename},
+                ) if _trace else None
+
+                success, invoice_data, error, num_of_pages = await self.invoice_parser.parse_invoice(task.pdf_path)
+
+                if _ocr_gen:
+                    _ocr_gen.end(
+                        output=invoice_data.model_dump() if invoice_data else None,
+                        level="ERROR" if not success else "DEFAULT",
+                        metadata={"page_count": num_of_pages, "error": error},
+                    )
 
                 if not success or not invoice_data:
                     # Mistral OCR failed

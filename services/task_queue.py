@@ -6,7 +6,7 @@ from datetime import datetime
 from uuid import uuid4
 from pydantic import BaseModel
 import aiofiles
-from config import redis_client, NOT_FOUND
+from config import redis_client, NOT_FOUND, langfuse_client
 from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData, custom_tds
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
@@ -234,6 +234,7 @@ class TaskQueueManager:
 
         while True:
             _ctx_token = None
+            _langfuse_trace = None
             try:
                 # Get next task (round-robin)
                 task = await self.get_next_task_round_robin()
@@ -250,6 +251,15 @@ class TaskQueueManager:
                     f"Worker {worker_id} processing {task.filename} "
                     f"(batch: {task.batch_id}, task: {task.task_id})"
                 )
+
+                # === Langfuse: start trace for this invoice ===
+                if langfuse_client:
+                    _langfuse_trace = langfuse_client.trace(
+                        id=task.task_id,
+                        session_id=task.batch_id,
+                        name="invoice-processing",
+                        input={"filename": task.filename},
+                    )
 
                 # Update file status to "processing"
                 self.session_manager.update_file_status(
@@ -380,7 +390,8 @@ class TaskQueueManager:
                     metadata={
                         "type": "expense_selection",
                         "filename": task.filename,
-                        "pydantic_json_schema": custom_schema_expense.model_json_schema()
+                        "pydantic_json_schema": custom_schema_expense.model_json_schema(),
+                        "generation_name": "dr-ledger",
                     }
                 )
 
@@ -392,19 +403,21 @@ class TaskQueueManager:
                     metadata={
                         "type": "vendor_selection",
                         "filename": task.filename,
-                        "pydantic_json_schema": custom_schema_liability.model_json_schema()
+                        "pydantic_json_schema": custom_schema_liability.model_json_schema(),
+                        "generation_name": "cr-ledger",
                     }
                 )
-                
+
                 tds_task_id = await self.llm_queue.enqueue_request(
                     batch_id=task.batch_id,
                     system_prompt=tds_system_prompt,
                     user_prompt=tds_user_prompt,
                     task_id=task.task_id,
                     metadata={
-                        "type": "expense_selection",
+                        "type": "tds_selection",
                         "filename": task.filename,
-                        "pydantic_json_schema": custom_schema_tds.model_json_schema()
+                        "pydantic_json_schema": custom_schema_tds.model_json_schema(),
+                        "generation_name": "tds-nature",
                     }
                 )
 
@@ -561,6 +574,20 @@ class TaskQueueManager:
 
                 logger.info(f"✅ Worker {worker_id} completed {task.filename}: {len(xl_rows)} XL rows generated")
 
+                # === Langfuse: update trace output on success ===
+                if _langfuse_trace:
+                    _langfuse_trace.update(
+                        output={
+                            "invoice_number": invoice_data.header.invoice_number,
+                            "vendor_name": invoice_data.header.vendor_name,
+                            "total_amount": invoice_data.total_amount,
+                            "expense_ledger": expense_ledger_name,
+                            "vendor_ledger": vendor_ledger_name,
+                            "tds_nature": tds_ledger_name,
+                            "voucher_number": voucher_number,
+                        }
+                    )
+
                 # Remove from processing set
                 await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
             
@@ -580,6 +607,10 @@ class TaskQueueManager:
 
                     # Clean up processing task from Redis
                     await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
+
+                # === Langfuse: mark trace as error ===
+                if _langfuse_trace:
+                    _langfuse_trace.update(level="ERROR", metadata={"error": str(e)})
 
                 await asyncio.sleep(1)
 

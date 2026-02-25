@@ -77,20 +77,26 @@ class InvoiceParser:
         return any(indicator in error_str for indicator in retryable_indicators)
     
     
-    async def parse_invoice(self, pdf_path: str, max_retries: int = 4) -> Tuple[bool, Optional[InvoiceData], Optional[str]]:
+    async def parse_invoice(self, pdf_path: str, max_retries: int = 4) -> Tuple[bool, Optional[InvoiceData], Optional[str], int]:
         """
         Parse invoice using actual Mistral OCR API with retry logic
-        
+
         Args:
             pdf_path: Path to the PDF file
             max_retries: Maximum number of retries (default: 4)
-        
+
         Returns:
-            Tuple of (success, invoice_data, error_message)
+            Tuple of (success, invoice_data, error_message, page_count)
         """
         filename = Path(pdf_path).name
-        
-        page_count = InvoiceParser.get_pdf_page_count(pdf_path)
+
+        try:
+            page_count = InvoiceParser.get_pdf_page_count(pdf_path)
+        except Exception as e:
+            logger.error(
+                f"For pdf {filename}, error occurred while reading page count: {e}"
+            )
+            page_count = -1
         
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt
@@ -140,17 +146,17 @@ class InvoiceParser:
                             f"Invoice: {invoice_data.header.invoice_number} | "
                             f"Total: {invoice_data.currency} {invoice_data.total_amount:,.2f}"
                         )
-                        return True, invoice_data, None
-                    
+                        return True, invoice_data, None, page_count
+
                     except json.JSONDecodeError as e:
                         error_msg = f"Failed to parse Mistral response JSON: {str(e)}"
                         logger.error(error_msg)
-                        return False, None, error_msg
-                    
+                        return False, None, error_msg, page_count
+
                     except Exception as e:
                         error_msg = f"Failed to validate invoice data: {str(e)}"
                         logger.error(error_msg)
-                        return False, None, error_msg
+                        return False, None, error_msg, page_count
                 else:
                     raise ValueError("No document_annotation returned from Mistral OCR")
             
@@ -170,9 +176,9 @@ class InvoiceParser:
                         logger.error(f"❌ Failed to parse {filename} after {max_retries} retries: {error_msg}")
                     else:
                         logger.error(f"❌ Non-retryable error for {filename}: {error_msg}")
-                    return False, None, error_msg
+                    return False, None, error_msg, page_count
     
-        return False, None, f"Failed to parse {filename} after all retries"
+        return False, None, f"Failed to parse {filename} after all retries", page_count
     
     
     def extract_metadata(self, invoice_data: InvoiceData) -> Dict[str, Any]:

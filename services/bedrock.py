@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 from config import BEDROCK_MODEL_ID, AWS_REGION, bedrock_semaphore, AWS_SECRET_ACCESS_KEY, AWS_ACCESS_KEY_ID
 from utils.logger import setup_logger
+from langfuse import observe
+from config import langfuse_client
 
 logger = setup_logger()
 
@@ -18,6 +20,7 @@ bedrock_client = boto3.client(
 )
 
 
+@observe(as_type="generation")
 async def call_bedrock(
     system_prompt: str,
     user_prompt: str,
@@ -67,8 +70,15 @@ async def call_bedrock(
             input_tokens = raw_response["usage"]["inputTokens"]
             output_tokens = raw_response["usage"]["outputTokens"]
             total_tokens = raw_response["usage"]["totalTokens"]
-            
+
             print(f"{input_tokens}, {output_tokens}, {total_tokens}")
+
+            if langfuse_client:
+                langfuse_client.update_current_generation(
+                    model=model_id,
+                    usage={"input": input_tokens, "output": output_tokens},
+                )
+
 
             text = raw_response["output"]["message"]["content"][0]["text"].strip()
             return text, True

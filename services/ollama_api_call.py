@@ -2,8 +2,8 @@ import ollama
 import asyncio
 from typing import Tuple, Optional, Type, Dict, Any
 from pydantic import BaseModel, Field
-from config import OLLAMA_MODEL_NAME, OLLAMA_BASE_URL, ollama_semaphore
-
+from config import OLLAMA_MODEL_NAME, OLLAMA_BASE_URL, ollama_semaphore, langfuse_client
+from langfuse import observe
 from utils.logger import setup_logger
 
 logger = setup_logger()
@@ -16,6 +16,7 @@ class LedgerNameOutputFormat(BaseModel):
     ledger_name: str = Field(description="The exact ledger name from the expense list")
 
 
+@observe(as_type="generation")
 async def call_ollama(
     system_prompt: str,
     user_prompt: str,
@@ -56,6 +57,8 @@ async def call_ollama(
                 response = await ollama_client.chat(**chat_kwargs)
 
             if response and 'message' in response and 'content' in response['message']:
+                if langfuse_client:
+                    langfuse_client.update_current_generation(model=model_name)
                 return response['message']['content'].strip(), True
             else:
                 raise ValueError("Invalid response format from Ollama")

@@ -118,4 +118,13 @@ LANGFUSE_SECRET_KEY=os.getenv("LANGFUSE_SECRET_KEY")
 LANGFUSE_PUBLIC_KEY=os.getenv("LANGFUSE_PUBLIC_KEY")
 LANGFUSE_BASE_URL=os.getenv("LANGFUSE_BASE_URL")
 
+langfuse_client = None
+if LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY:
+    from langfuse import Langfuse
+    langfuse_client = Langfuse(
+        public_key=LANGFUSE_PUBLIC_KEY,
+        secret_key=LANGFUSE_SECRET_KEY,
+        host=LANGFUSE_BASE_URL or "https://cloud.langfuse.com",
+    )
+
 

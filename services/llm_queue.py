@@ -12,15 +12,15 @@ from typing import Optional
 from datetime import datetime
 from uuid import uuid4
 
-from config import redis_client
+from config import redis_client, langfuse_client, LLM_PROVIDER, BEDROCK_MODEL_ID, OLLAMA_MODEL_NAME
 from models import OllamaRequest, OllamaResponse
 from utils.logger import setup_logger, batch_id_var
 from services.bedrock import call_bedrock
 from services.ollama_api_call import call_ollama
 from typing import Optional, Dict, Any, Tuple
-from config import LLM_PROVIDER
 from redis import Redis
-
+from langfuse import observe
+from langfuse.openai import openai
 
 logger = setup_logger()
 
@@ -154,12 +154,20 @@ class LLMQueue:
 
         return None
 
+    @observe()
     async def call_llm_and_respond(self, request: OllamaRequest) -> OllamaResponse:
         """
         Call the LLM via llm_client dispatcher and return a normalized OllamaResponse.
         Provider-agnostic: bedrock, ollama, or any future provider all go through call_llm().
         """
-        
+        if langfuse_client:
+            generation_name = request.metadata.get("generation_name", "llm-call") if request.metadata else "llm-call"
+            langfuse_client.update_current_trace(id=request.task_id, session_id=request.batch_id)
+            langfuse_client.update_current_span(
+                name=generation_name,
+                input={"system": request.system_prompt, "user": request.user_prompt},
+            )
+
         try:
             pydantic_json_schema = request.metadata.get('pydantic_json_schema') if request.metadata else None
 
