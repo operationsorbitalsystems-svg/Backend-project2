@@ -14,10 +14,30 @@ from uuid import uuid4
 
 from config import redis_client
 from models import OllamaRequest, OllamaResponse
-from services.llm_client import call_llm
 from utils.logger import setup_logger, batch_id_var
+from services.bedrock import call_bedrock
+from services.ollama_api_call import call_ollama
+from typing import Optional, Dict, Any, Tuple
+from config import LLM_PROVIDER
+from redis import Redis
+
 
 logger = setup_logger()
+
+
+"""
+LLM Client Dispatcher
+
+Single entry point for all LLM calls. Dispatches to the correct provider
+based on the LLM_PROVIDER env var. All providers return (str, bool).
+
+To add a new provider:
+  1. Create services/<provider>.py with call_<provider>(...) -> (str, bool)
+  2. Add an elif branch below
+  3. Set LLM_PROVIDER=<provider> in .env
+"""
+
+
 
 
 class LLMQueue:
@@ -32,21 +52,61 @@ class LLMQueue:
     ROUND_ROBIN_INDEX_KEY = "llm_queue:round_robin_index"
     PROCESSING_PREFIX = "llm_queue:processing:"
 
-    def __init__(self, redis_client):
+    def __init__(self, redis_client: Redis):
         if redis_client is None:
             raise ValueError("Redis client is required for LLM queue")
         self.redis = redis_client
         logger.info("LLMQueue initialized")
+
+
+
+    async def call_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        pydantic_json_schema: Optional[Dict[str, Any]] = None
+    ) -> Tuple[str, bool]:
+        """
+        Dispatch an LLM call to the configured provider.
+
+        Args:
+            system_prompt: System/role instructions for the model
+            user_prompt: The user query
+            pydantic_json_schema: Optional JSON schema to constrain output
+
+        Returns:
+            (response_text, success) — normalized across all providers
+        """
+        if LLM_PROVIDER == "bedrock":
+
+            return await call_bedrock(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                pydantic_json_schema=pydantic_json_schema
+            )
+
+        elif LLM_PROVIDER == "ollama":
+
+            return await call_ollama(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                pydantic_json_schema=pydantic_json_schema
+            )
+
+        else:
+            raise ValueError(f"Unknown LLM_PROVIDER: '{LLM_PROVIDER}'. Set LLM_PROVIDER to 'bedrock' or 'ollama'.")
+
 
     async def enqueue_request(
         self,
         batch_id: str,
         system_prompt: str,
         user_prompt: str,
+        task_id: str,
         metadata: Optional[dict] = None
     ) -> str:
         request = OllamaRequest(
-            task_id=str(uuid4()),
+            task_id=task_id,
             batch_id=batch_id,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -99,10 +159,11 @@ class LLMQueue:
         Call the LLM via llm_client dispatcher and return a normalized OllamaResponse.
         Provider-agnostic: bedrock, ollama, or any future provider all go through call_llm().
         """
+        
         try:
             pydantic_json_schema = request.metadata.get('pydantic_json_schema') if request.metadata else None
 
-            response_text, success = await call_llm(
+            response_text, success = await self.call_llm(
                 system_prompt=request.system_prompt,
                 user_prompt=request.user_prompt,
                 pydantic_json_schema=pydantic_json_schema

@@ -5,10 +5,11 @@ import asyncio
 from typing import Dict, Any, Tuple, Optional, List
 from pathlib import Path
 from config import MISTRAL_API_KEY, mistral_semaphore
-from models import InvoiceData, InvoiceHeader, InvoiceLineItem
+from models import InvoiceData
 from utils.logger import setup_logger
 from mistralai import Mistral
-                
+from pypdf import PdfReader
+
 logger = setup_logger()
 
 
@@ -51,6 +52,16 @@ class InvoiceParser:
             logger.error(f"Error encoding PDF: {str(e)}")
             raise
     
+    
+    @staticmethod
+    def get_pdf_page_count(pdf_path: str) -> int:
+        try:
+            reader = PdfReader(pdf_path)
+            return len(reader.pages)
+        except Exception as e:
+            logger.error(f"Failed to read PDF pages: {str(e)}")
+            raise
+    
     @staticmethod
     def is_retryable_error(error: Exception) -> bool:
         """Check if error is retryable (500 errors, service unavailable, etc.)"""
@@ -86,6 +97,8 @@ class InvoiceParser:
             Tuple of (success, invoice_data, error_message)
         """
         filename = Path(pdf_path).name
+        
+        page_count = InvoiceParser.get_pdf_page_count(pdf_path)
         
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt

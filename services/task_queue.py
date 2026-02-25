@@ -6,10 +6,9 @@ from datetime import datetime
 from uuid import uuid4
 from pydantic import BaseModel
 import aiofiles
-from config import redis_client, MAX_MISTRAL_CONCURRENT, NOT_FOUND
+from config import redis_client, NOT_FOUND
 from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData, custom_tds
 from services.session_manager import get_session_manager
-from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
 from services.llm_queue import get_llm_queue
@@ -18,7 +17,10 @@ from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_
 import re
 from utils.coa_tree_traversal import find_matching_non_leaf_node, extract_leaf_nodes
 from utils.tds import MANAGER
-
+from mistral_queue import MistralQueueManager
+from redis import Redis
+from session_manager import RedisSessionManager
+from llm_queue import LLMQueue
 
 logger = setup_logger()
 
@@ -32,14 +34,13 @@ class TaskQueueManager:
     in round-robin fashion, preventing any single user from monopolizing workers.
     """
 
-    def __init__(self, redis_client, mistral_queue, llm_queue=None, session_manager=None, file_handler=None):
+    def __init__(self, redis_client: Redis, mistral_queue: MistralQueueManager, llm_queue: LLMQueue=None, session_manager: RedisSessionManager=None, file_handler=None):
         if redis_client is None:
             raise ValueError("Redis client is required for task queue. Set REDIS_ENABLED=true")
 
         self.redis = redis_client
         self.mistral_queue = mistral_queue  # NEW: Mistral task queue
         self.session_manager = session_manager if session_manager is not None else get_session_manager()
-        self.invoice_parser = InvoiceParser()
         self.file_handler = file_handler if file_handler is not None else FileHandler()
         self.llm_queue = llm_queue if llm_queue is not None else get_llm_queue()
 
@@ -260,7 +261,8 @@ class TaskQueueManager:
                 mistral_task_id = await self.mistral_queue.enqueue_request(
                     batch_id=task.batch_id,
                     filename=task.filename,
-                    pdf_path=task.pdf_path
+                    pdf_path=task.pdf_path,
+                    task_id= task.task_id
                 )
 
                 # === STEP 2: Wait for Mistral Result (BLOCKING) ===
@@ -373,6 +375,7 @@ class TaskQueueManager:
                     batch_id=task.batch_id,
                     system_prompt=expense_system_prompt,
                     user_prompt=expense_user_prompt,
+                    task_id=task.task_id,
                     metadata={
                         "type": "expense_selection",
                         "filename": task.filename,
@@ -384,6 +387,7 @@ class TaskQueueManager:
                     batch_id=task.batch_id,
                     system_prompt=vendor_system_prompt,
                     user_prompt=vendor_user_prompt,
+                    task_id=task.task_id,
                     metadata={
                         "type": "vendor_selection",
                         "filename": task.filename,
@@ -395,6 +399,7 @@ class TaskQueueManager:
                     batch_id=task.batch_id,
                     system_prompt=tds_system_prompt,
                     user_prompt=tds_user_prompt,
+                    task_id=task.task_id,
                     metadata={
                         "type": "expense_selection",
                         "filename": task.filename,

@@ -112,3 +112,10 @@ CW_LOG_GROUP           = os.getenv("CW_LOG_GROUP", "/invoice-parser/app")
 
 CLEANUP_BATCH_HOURS = float(os.getenv("CLEANUP_BATCH_HOURS", "0.5"))
 CLEANUP_AGE = float(os.getenv("CLEANUP_AGE", "0.5"))
+
+
+LANGFUSE_SECRET_KEY=os.getenv("LANGFUSE_SECRET_KEY")
+LANGFUSE_PUBLIC_KEY=os.getenv("LANGFUSE_PUBLIC_KEY")
+LANGFUSE_BASE_URL=os.getenv("LANGFUSE_BASE_URL")
+
+

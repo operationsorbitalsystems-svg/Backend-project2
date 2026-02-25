@@ -63,6 +63,12 @@ async def call_bedrock(
                         "topP": 0.9
                     }
                 )
+                
+            input_tokens = raw_response["usage"]["inputTokens"]
+            output_tokens = raw_response["usage"]["outputTokens"]
+            total_tokens = raw_response["usage"]["totalTokens"]
+            
+            print(f"{input_tokens}, {output_tokens}, {total_tokens}")
 
             text = raw_response["output"]["message"]["content"][0]["text"].strip()
             return text, True

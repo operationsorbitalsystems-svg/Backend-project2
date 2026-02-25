@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, UTC
 from typing import Optional
 import aiofiles
+from redis import Redis
 
 from models import MistralRequest, MistralResponse, InvoiceData
 from utils.logger import setup_logger, batch_id_var
@@ -35,7 +36,7 @@ class MistralQueueManager:
     ACTIVE_BATCHES_KEY = "mistral_queue:active_batches"
     ROUND_ROBIN_INDEX_KEY = "mistral_queue:round_robin_index"
 
-    def __init__(self, redis_client, invoice_parser, file_handler):
+    def __init__(self, redis_client: Redis, invoice_parser, file_handler):
         """
         Initialize Mistral Queue Manager.
 
@@ -50,7 +51,7 @@ class MistralQueueManager:
         self.running = False
         self.workers = []
 
-    async def enqueue_request(self, batch_id: str, filename: str, pdf_path: str) -> str:
+    async def enqueue_request(self, batch_id: str, filename: str, pdf_path: str, task_id: str) -> str:
         """
         Enqueue a new Mistral OCR request.
 
@@ -62,7 +63,6 @@ class MistralQueueManager:
         Returns:
             task_id: Unique task identifier
         """
-        task_id = str(uuid.uuid4())
 
         request = MistralRequest(
             task_id=task_id,
