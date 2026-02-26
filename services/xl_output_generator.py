@@ -249,12 +249,6 @@ class XLOutputGenerator:
                 return rows
 
             
-    #         class TDSRate(TypedDict):
-    # section: str
-    # nature_of_transaction: str
-    # threshold_limit: int
-    # tds_rate: float
-            
 
         # Step 3: Cr entry for vendor/liability
         rows.append(XLOutputRow(

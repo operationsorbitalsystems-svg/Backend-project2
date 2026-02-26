@@ -14,10 +14,15 @@ from uuid import uuid4
 
 from config import redis_client
 from models import OllamaRequest, OllamaResponse
-from services.llm_client import call_llm
 from utils.logger import setup_logger, batch_id_var
 
+from typing import Optional, Dict, Any, Tuple
+from config import LLM_PROVIDER
+
+
 logger = setup_logger()
+
+
 
 
 class LLMQueue:
@@ -37,6 +42,44 @@ class LLMQueue:
             raise ValueError("Redis client is required for LLM queue")
         self.redis = redis_client
         logger.info("LLMQueue initialized")
+        
+
+    async def call_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        pydantic_json_schema: Optional[Dict[str, Any]] = None
+    ) -> Tuple[str, bool]:
+        """
+        Dispatch an LLM call to the configured provider.
+
+        Args:
+            system_prompt: System/role instructions for the model
+            user_prompt: The user query
+            pydantic_json_schema: Optional JSON schema to constrain output
+
+        Returns:
+            (response_text, success) — normalized across all providers
+        """
+        if LLM_PROVIDER == "bedrock":
+            from services.bedrock import call_bedrock
+            return await call_bedrock(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                pydantic_json_schema=pydantic_json_schema
+            )
+
+        elif LLM_PROVIDER == "ollama":
+            from services.ollama_api_call import call_ollama
+            return await call_ollama(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                pydantic_json_schema=pydantic_json_schema
+            )
+
+        else:
+            raise ValueError(f"Unknown LLM_PROVIDER: '{LLM_PROVIDER}'. Set LLM_PROVIDER to 'bedrock' or 'ollama'.")
+
 
     async def enqueue_request(
         self,
@@ -102,7 +145,7 @@ class LLMQueue:
         try:
             pydantic_json_schema = request.metadata.get('pydantic_json_schema') if request.metadata else None
 
-            response_text, success = await call_llm(
+            response_text, success = await self.call_llm(
                 system_prompt=request.system_prompt,
                 user_prompt=request.user_prompt,
                 pydantic_json_schema=pydantic_json_schema

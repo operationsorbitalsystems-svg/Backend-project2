@@ -2,6 +2,10 @@ from pydantic import BaseModel, constr, field_validator, create_model, Field
 from typing import List, Optional, Dict, Any, Literal, Set
 from datetime import datetime
 from config import NOT_FOUND
+import re
+from utils.logger import setup_logger
+
+logger = setup_logger()
 
 # === Session Models ===
 
@@ -37,18 +41,30 @@ class InvoiceHeader(BaseModel):
     @classmethod
     def validate_pincode(cls, v):
         if v is None:
-            return v
-        if not (v.isdigit() and len(v) == 6):
-            raise ValueError("Pincode must be a 6-digit numeric string")
-        return v
+            return None
+        
+        cleaned = re.sub(r"[ -]", "", v.strip())
+
+        if cleaned.isdigit() and len(cleaned) == 6:
+            return cleaned
+        
+        # Non-blocking behavior
+        logger.warning(
+            f"Invalid vendor_pin_code detected ('{v}'). "
+            "Setting vendor_pin_code to None."
+        )
+        return None
 
 
 class InvoiceLineItem(BaseModel):
     description: str
-    quantity: Optional[int] = None
+    quantity: Optional[float] = None
     unit_price: Optional[float] = None
     amount: float
 
+
+from pydantic import BaseModel, model_validator
+from typing import List, Optional
 
 class InvoiceData(BaseModel):
     header: InvoiceHeader
@@ -61,7 +77,19 @@ class InvoiceData(BaseModel):
     currency: str
     already_recieved: Optional[float] = None
 
+    @model_validator(mode="after")
+    def sync_cgst_sgst(self):
+        # Case 1: CGST exists but SGST missing
+        if self.cgst_tax_amount is not None and self.sgst_tax_amount is None:
+            self.sgst_tax_amount = self.cgst_tax_amount
 
+        # Case 2: SGST exists but CGST missing
+        elif self.sgst_tax_amount is not None and self.cgst_tax_amount is None:
+            self.cgst_tax_amount = self.sgst_tax_amount
+
+        return self
+    
+    
 class XLOutputRow(BaseModel):
     """Excel output row for journal entry import"""
     voucher_date: str  # ISO date from invoice

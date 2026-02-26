@@ -9,7 +9,6 @@ import aiofiles
 from config import redis_client, MAX_MISTRAL_CONCURRENT, NOT_FOUND
 from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData, custom_tds
 from services.session_manager import get_session_manager
-from services.invoice_parser import InvoiceParser
 from services.file_handler import FileHandler
 from services.xl_output_generator import XLOutputGenerator
 from services.llm_queue import get_llm_queue
@@ -18,7 +17,11 @@ from utils.prompts import ledger_name_prompt_cr, ledger_name_prompt_dr, extract_
 import re
 from utils.coa_tree_traversal import find_matching_non_leaf_node, extract_leaf_nodes
 from utils.tds import MANAGER
-
+from redis import Redis
+from .session_manager import RedisSessionManager
+from .mistral_queue import MistralQueueManager
+from .llm_queue import LLMQueue
+from .file_handler import FileHandler
 
 logger = setup_logger()
 
@@ -32,14 +35,13 @@ class TaskQueueManager:
     in round-robin fashion, preventing any single user from monopolizing workers.
     """
 
-    def __init__(self, redis_client, mistral_queue, llm_queue=None, session_manager=None, file_handler=None):
+    def __init__(self, redis_client: Redis, mistral_queue: MistralQueueManager, llm_queue: LLMQueue=None, session_manager : RedisSessionManager =None, file_handler: FileHandler =None):
         if redis_client is None:
             raise ValueError("Redis client is required for task queue. Set REDIS_ENABLED=true")
 
         self.redis = redis_client
         self.mistral_queue = mistral_queue  # NEW: Mistral task queue
         self.session_manager = session_manager if session_manager is not None else get_session_manager()
-        self.invoice_parser = InvoiceParser()
         self.file_handler = file_handler if file_handler is not None else FileHandler()
         self.llm_queue = llm_queue if llm_queue is not None else get_llm_queue()
 
@@ -67,7 +69,7 @@ class TaskQueueManager:
         """
         # Create task item
         task = TaskItem(
-            task_id=str(uuid4()),
+            task_id=uuid4().hex,
             batch_id=batch_id,
             vendor_name=vendor_name,
             filename=filename,
@@ -135,8 +137,8 @@ class TaskQueueManager:
 
             # Retry with remaining batches (recursive)
             return await self.get_next_task_round_robin()
-        
-    def get_or_load_expense_leaves(self, batch_id: str, pattern_report : re.compile) -> Optional[list]:
+
+    def get_or_load_expense_leaves(self, batch_id: str, pattern_report : re.compile = None) -> Optional[list]:
         """
         Get expense leaf nodes from cache or load from COA file.
         Cache is in-memory per batch. On server restart, reloads on-demand.
@@ -147,6 +149,9 @@ class TaskQueueManager:
 
         # Load from COA file
         try:
+            if not pattern_report:
+                pattern_report = re.compile(r'(?i)\bexpense(s)?\b')
+            
             coa_data = self.file_handler.read_coa_json(batch_id)
             if not coa_data:
                 logger.error(f"No COA data found for batch {batch_id}")
@@ -313,13 +318,14 @@ class TaskQueueManager:
 
                 # === STEP 2a: Prepare Expense Ollama Request ===
                 # expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
-                expense_pattern = re.compile(r'(?i)\bexpense(s)?\b')
-                expense_ledgers = self.get_or_load_expense_leaves(task.batch_id,  expense_pattern)
+
+                expense_ledgers = self.get_or_load_expense_leaves(task.batch_id)
                 narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
                                     
                 custom_schema_expense = custom_ledger(expense_ledgers)
                 
                 expense_ledgers = set(expense_ledgers)
+
 
                 expense_ledgers.add(NOT_FOUND)
 
@@ -328,6 +334,9 @@ class TaskQueueManager:
                     expense_leaf_nodes=expense_ledgers
                     
                 )
+                
+                logger.debug(f"Worker {worker_id} Expenses Array is : {expense_ledgers}")
+
 
                 # === STEP 2b: Prepare Vendor Ollama Request ===
                 # liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
@@ -364,8 +373,8 @@ class TaskQueueManager:
                     
                 )
                 
-                # #REMOVE THIS BEFORE PROD
-                # logger.info(f"Worker {worker_id} TDS Set is : {tds_set}")
+                #REMOVE THIS BEFORE PROD
+                logger.debug(f"Worker {worker_id} TDS Set is : {tds_set}")
                
 
                 # === STEP 3: Enqueue BOTH(+ TDS) Ollama Tasks (NON-BLOCKING) ===
@@ -402,7 +411,7 @@ class TaskQueueManager:
                     }
                 )
 
-                # === STEP 4: Wait for BOTH Ollama Results in Parallel ===
+                # === STEP 4: Wait for ALL LLM Results in Parallel ===
                 # Use gather with return_exceptions=True to handle individual failures
                 results = await asyncio.gather(
                     self.llm_queue.wait_for_response(expense_task_id, timeout=60),
@@ -419,11 +428,11 @@ class TaskQueueManager:
 
                 # === STEP 5: Parse Expense Ledger (with fallback) ===
                 if isinstance(expense_response, Exception) or isinstance(expense_response, TimeoutError):
-                    logger.error(f"Worker {worker_id} Ollama timeout/error for expense ledger: {task.filename}")
+                    logger.error(f"Worker {worker_id} LLM timeout/error for expense ledger: {task.filename}")
                     expense_ledger_name = NOT_FOUND
                     expense_confidence = 0.0
                 elif not expense_response.success:
-                    logger.error(f"Worker {worker_id} No Ledger name for Expense through Ollama")
+                    logger.error(f"Worker {worker_id} No Ledger name for Expense through LLM")
                     expense_ledger_name = NOT_FOUND
                     expense_confidence = 0.0
                 else:
