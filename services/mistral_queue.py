@@ -14,6 +14,9 @@ import aiofiles
 
 from models import MistralRequest, MistralResponse, InvoiceData
 from utils.logger import setup_logger, batch_id_var
+from redis import Redis
+from .invoice_parser import InvoiceParser
+from .file_handler import FileHandler
 
 logger = setup_logger()
 
@@ -35,7 +38,7 @@ class MistralQueueManager:
     ACTIVE_BATCHES_KEY = "mistral_queue:active_batches"
     ROUND_ROBIN_INDEX_KEY = "mistral_queue:round_robin_index"
 
-    def __init__(self, redis_client, invoice_parser, file_handler):
+    def __init__(self, redis_client: Redis, invoice_parser: InvoiceParser, file_handler: InvoiceParser):
         """
         Initialize Mistral Queue Manager.
 

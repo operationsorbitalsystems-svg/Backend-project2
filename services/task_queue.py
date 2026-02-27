@@ -377,7 +377,7 @@ class TaskQueueManager:
                 logger.debug(f"Worker {worker_id} TDS Set is : {tds_set}")
                
 
-                # === STEP 3: Enqueue BOTH(+ TDS) Ollama Tasks (NON-BLOCKING) ===
+                # === STEP 3: Enqueue BOTH(+ TDS) LLM Tasks (NON-BLOCKING) ===
                 expense_task_id = await self.llm_queue.enqueue_request(
                     batch_id=task.batch_id,
                     system_prompt=expense_system_prompt,

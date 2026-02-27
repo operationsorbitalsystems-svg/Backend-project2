@@ -43,6 +43,3 @@ class COAOutput(BaseModel):
     debug_sentences: Optional[List[Dict]] = None
     debug_levels: Optional[List[Dict]] = None
     sentence_array : List[Sentence] = []
-    phase_3 : List[Level] = []
-    phase_4 : List[Sentence] = []
-    phase_5 : List = []
