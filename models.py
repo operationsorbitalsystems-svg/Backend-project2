@@ -306,3 +306,34 @@ class MistralResponse(BaseModel):
     error_message: Optional[str] = None
     processed_at: str
 
+
+
+
+
+
+
+
+# ── Data models - AGENT ───────────────────────────────────────────────────────────────
+
+class AgentRequest(BaseModel):
+    task_id: str
+    batch_id: str
+    line_item: str                       # invoice line item description
+    expenses_tree: Dict[str, Any]           # COA Expenses subtree (JSON-serialisable)
+    vendor_name: Optional[str] = None
+    enqueued_at: str
+    metadata: Dict[str, Any] = {}
+    file_name: str
+
+
+class AgentResponse(BaseModel):
+    task_id: str
+    batch_id: str
+    line_item: str
+    selected_leaf: Optional[str]            # None on failure
+    success: bool
+    error: Optional[str] = None
+    completed_at: Optional[str] = None
+    metadata: Dict[str, Any] = {}
+
+

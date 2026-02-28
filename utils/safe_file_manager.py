@@ -52,3 +52,5 @@ dr_prompt_file  = RedisConfigStore(redis_sync_client, "config:prompt:dr",  "prom
 cr_prompt_file  = RedisConfigStore(redis_sync_client, "config:prompt:cr",  "prompts/cr_prompt.txt")
 tds_prompt_file = RedisConfigStore(redis_sync_client, "config:prompt:tds", "prompts/tds_nature_prompt.txt")
 tds_file        = RedisConfigStore(redis_sync_client, "config:tds_rates",  "data/tds_rates.json")
+dr_agent_prompt_file = RedisConfigStore(redis_sync_client, "config:dr_agent_prompt", "prompts/dr_agent_prompt.txt")
+

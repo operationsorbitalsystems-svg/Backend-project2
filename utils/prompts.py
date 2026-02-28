@@ -1,8 +1,6 @@
-from coa_utils.models import COAOutput
-from models import InvoiceData
-from typing import Tuple, List, Dict, Any
+from typing import Tuple, List, Dict, Any, Optional
 from config import NOT_FOUND
-from .safe_file_manager import dr_prompt_file, cr_prompt_file, tds_prompt_file
+from .safe_file_manager import dr_prompt_file, cr_prompt_file, tds_prompt_file, dr_agent_prompt_file
 
 
 def extract_expense_leaf_nodes(coa_hierarchy: Dict[str, Any]) -> List[str]:
@@ -141,4 +139,110 @@ def tds_nature_prompt(
 Select the appropriate Nature of Transaction:"""
 
     return system_prompt, user_prompt
+
+
+
+
+def build_system_prompt_agent(invoice_description: str, vendor_name: Optional[str]) -> str:
+    
+    SYSTEM_PROMPT_TEMPLATE = dr_agent_prompt_file.read()
+    
+    # ── System prompt ─────────────────────────────────────────────────────────────
+    tool_info = """\
+
+    ━━━ HOW THE TREE WORKS ━━━
+    The tree is a hierarchy rooted at ["Expenses"]. Every node is either:
+    FOLDER — has children inside it (type: "folder")
+    LEAF   — a final ledger account, no children (type: "leaf")
+    You must select a LEAF as your final answer.
+
+    ━━━ HOW TO CALL TOOLS ━━━
+    Output EXACTLY ONE tool call per response, as a JSON block like this:
+
+    ```json
+    {{"tool": "get_children", "input": {{"path": ["Expenses"]}}}}
+    ```
+
+    Wait for the tool result before calling another tool.
+    Do NOT call multiple tools in one response.
+    Do NOT add any text after the JSON block when making a tool call.
+
+    ━━━ AVAILABLE TOOLS ━━━
+
+    get_children — See the immediate children of any node you are at.
+    Input:  {{"tool": "get_children", "input":{{"path": ["Expenses", "some folder"]}} }}
+    Output: list of children with name, type (leaf/folder), state, leaf_count
+
+    navigate_to — Move into a node OR backtrack to a parent/sibling you have seen before.
+    Input: {{"tool": "navigate_to", "input": {{"path": ["Expenses", "some folder"]}} }}
+    Cannot navigate to EXHAUSTED or DISCARDED nodes.
+
+    update_node_states — Mark nodes as DISCARDED (skip by name) or EXHAUSTED (explored, empty).
+    Input: {{"tool": "update_node_states", "input": {{"updates": [{{"path": ["Expenses", "X"], "state": "DISCARDED"}}, ...]}} }}
+    Discard irrelevant branches immediately to save turns.
+
+    get_leaf_nodes — Get ALL leaf names under a path in one call.
+    Input: {{"tool": "get_leaf_nodes", "input": {{"path": ["Expenses", "some folder"]}} }}
+    Use this once you are confident you are in the right subtree.
+
+    get_unexplored_paths — See everything still left to try. Use when unsure what's next.
+    Input:{{"tool": "get_unexplored_paths", "input":  {{}} }}
+
+    select_leaf — YOUR FINAL ANSWER. Only call when certain.
+    Input: {{"tool": "select_leaf", "input": {{"path": ["Expenses", "...", "...", "direct parent folder"], "leaf_name": "Exact Leaf Name"}} }}
+    
+    CRITICAL: `path` must be the COMPLETE path from "Expenses" down to the 
+    IMMEDIATE parent folder of the leaf. Every intermediate folder must be 
+    included. The leaf's direct parent is the last element in the path.
+    
+    Example — to select "Freight Outward ? General" which lives under:
+    Expenses → Indirect Expenses → Other Indirect Expenses → 
+        Selling and Distribution Expenses → Distribution Expenses
+    
+    Correct call:
+    {{
+        "tool" : "select_leaf",
+        "input" :    {{
+            "path": ["Expenses", "Indirect Expenses", "Other Indirect Expenses", 
+                    "Selling and Distribution Expenses", "Distribution Expenses"],
+            "leaf_name": "Freight Outward ? General"
+        }}
+    }}
+    
+    
+    Wrong tool call:
+        WRONG — missing "tool" key:      {{"input": {{"path": ["Expenses"]}}}}
+        WRONG — missing "input" key:     {{"tool": "get_children", "path": ["Expenses"]}}
+        WRONG — duplicate Expenses root + no tool key and input key wrapper: {{"path": ["Expenses", "Expenses", "..."]}}
+        WRONG — leaf included in path + no tool key and input key wrapper:   {{"path": ["Expenses", "...", "Leaf Name"], "leaf_name": "Leaf Name"}}
+
+
+    ━━━ NODE STATES ━━━
+    UNEXPLORED  → Seen but not entered. Should explore.
+    IN_PROGRESS → Currently being explored.
+    EXHAUSTED   → Entered, nothing suitable found. Do NOT re-enter.
+    DISCARDED   → Skipped by name as irrelevant. Do NOT enter.
+
+    ━━━ STRATEGY ━━━
+    1. Call get_children on ["Expenses"] to see the top-level options.
+    2. Immediately DISCARD obviously irrelevant branches (e.g. Depreciation, Tax Expenses for a travel invoice).
+    3. Navigate into the most relevant branch.
+    4. Once you believe you are in the right area, call get_leaf_nodes.
+    5. If there are ≤15 leaves, pick the best one and call select_leaf.
+    6. If you went the wrong way, mark it EXHAUSTED, navigate_to a sibling or parent, and try again.
+    7. If lost, call get_unexplored_paths to see what is left.
+
+    BEGIN: Call get_children with path ["Expenses"] now.
+    """
+
+
+
+
+    SYSTEM_PROMPT_TEMPLATE += "\n" + tool_info
+
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        invoice_description=invoice_description,
+        vendor_name=vendor_name or "Unknown",
+    )
+
 

@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import asyncio
 import redis
 import redis.asyncio as redis_async
-
+from langfuse import Langfuse, get_client
 
 load_dotenv()
 
@@ -20,6 +20,32 @@ MAX_BEDROCK_CONCURRENT_CALLS = int(os.getenv("MAX_BEDROCK_CONCURRENT_CALLS", "5"
 mistral_semaphore = asyncio.Semaphore(MAX_MISTRAL_CONCURRENT)
 ollama_semaphore = asyncio.Semaphore(MAX_OLLAMA_CONCURRENT_CALLS)
 bedrock_semaphore = asyncio.Semaphore(MAX_BEDROCK_CONCURRENT_CALLS)
+
+
+
+
+AGENT_MAX_TURNS = int(os.getenv("AGENT_MAX_TURNS", "20"))
+MAX_RETRIES_AGENT = int(os.getenv("MAX_RETRIES_AGENT", "5"))
+RETRY_BASE_DELAY_AGENT=   float(os.getenv("RETRY_BASE_DELAY_AGENT", "1.0")) # seconds
+RETRY_MAX_DELAY_AGENT  =   float(os.getenv("RETRY_MAX_DELAY_AGENT", "60.0")) # seconds
+
+# Retryable Bedrock error codes
+RETRYABLE_CODES_AGENT = {
+    "ThrottlingException",
+    "ServiceUnavailableException",
+    "RequestLimitExceeded",
+    "InternalServerError",
+    "ModelNotReadyException",
+}
+
+BEDROCK_AGENT_MODEL_ID=os.getenv("BEDROCK_AGENT_MODEL_ID")
+
+
+
+
+USE_DR_AGENT = os.getenv("USE_DR_AGENT", "True").lower() == "true"
+
+
 
 # Mistral AI
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
@@ -68,6 +94,17 @@ if REDIS_ENABLED:
         import logging
         logging.warning(f"Failed to connect to Redis: {e}")
         
+
+
+
+Langfuse(
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+)
+langfuse = get_client()
+
+
 
 
 
