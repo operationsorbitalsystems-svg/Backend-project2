@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import asyncio
 import redis
 import redis.asyncio as redis_async
-
+from langfuse import Langfuse, get_client
 
 load_dotenv()
 
@@ -68,6 +68,17 @@ if REDIS_ENABLED:
         import logging
         logging.warning(f"Failed to connect to Redis: {e}")
         
+
+
+
+Langfuse(
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
+    host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+)
+langfuse = get_client()
+
+
 
 
 
