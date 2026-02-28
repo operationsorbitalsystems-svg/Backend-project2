@@ -27,6 +27,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from botocore.exceptions import ClientError
 from langfuse import get_client
+import random
+import asyncio
 
 from config import BEDROCK_MODEL_ID as MODEL_ID
 from config import bedrock_semaphore
@@ -35,6 +37,7 @@ from .tools import execute_tool
 from utils.logger import setup_logger
 from utils.prompts import build_system_prompt_agent
 from services.bedrock import bedrock_client
+from config import AGENT_MAX_TURNS as MAX_TURNS, MAX_RETRIES_AGENT as MAX_RETRIES, RETRY_MAX_DELAY_AGENT as RETRY_MAX_DELAY, RETRYABLE_CODES_AGENT as _RETRYABLE_CODES, RETRY_BASE_DELAY_AGENT as RETRY_BASE_DELAY
 
 # BASE_DIR = Path(__file__).resolve().parent.parent
 # PROMPT_PATH = BASE_DIR / "prompts" / ".txt"
@@ -42,7 +45,6 @@ from services.bedrock import bedrock_client
 logger = setup_logger()
 
 # ── Safety cap ────────────────────────────────────────────────────────────────
-MAX_TURNS = 30  # max LLM round-trips per invoice
 
 # ── Regex to extract JSON tool calls from model text output ───────────────────
 # Matches: ```json ... ```,  ``` ... ```, or ```tool_code ... ``` blocks
@@ -158,16 +160,43 @@ async def run_agent(
             ) as gen_span:
                 
                 async with bedrock_semaphore:
-                    try:
-                        response = bedrock_client.converse(
-                            modelId=MODEL_ID,
-                            system=[{"text": system_prompt}],
-                            messages=messages,
-                            inferenceConfig={"maxTokens": 1024, "temperature": 0.0},
-                        )
-                    except ClientError as e:
-                        raise RuntimeError(f"Bedrock API error on turn {turn}: {e}") from e
+                    last_exc = None
+                    for attempt in range(1, MAX_RETRIES + 1):
+                        try:
+                            response = bedrock_client.converse(
+                                modelId=MODEL_ID,
+                                system=[{"text": system_prompt}],
+                                messages=messages,
+                                inferenceConfig={"maxTokens": 1024, "temperature": 0.0},
+                            )
+                            break  # success — exit retry loop
+                        except ClientError as e:
+                            error_code = e.response["Error"]["Code"]
+                            last_exc = e
 
+                            if error_code not in _RETRYABLE_CODES or attempt == MAX_RETRIES:
+                                raise RuntimeError(
+                                    f"Bedrock API error on turn {turn} "
+                                    f"(attempt {attempt}/{MAX_RETRIES}, code={error_code}): {e}"
+                                ) from e
+
+                            delay = min(
+                                RETRY_BASE_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1),
+                                RETRY_MAX_DELAY,
+                            )
+                            logger.warning(
+                                f"Bedrock {error_code} on turn {turn}, attempt {attempt}/{MAX_RETRIES}. "
+                                f"Retrying in {delay:.1f}s..."
+                            )
+                            await asyncio.sleep(delay)
+                    else:
+                        # Exhausted all retries (shouldn't normally reach here due to raise above)
+                        raise RuntimeError(
+                            f"Bedrock call failed after {MAX_RETRIES} attempts on turn {turn}"
+                        ) from last_exc
+                        
+                        
+                        
                 output_message = response["output"]["message"]
 
                 # Extract full text from response

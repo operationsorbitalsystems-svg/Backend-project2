@@ -6,8 +6,8 @@ from datetime import datetime
 from uuid import uuid4
 from pydantic import BaseModel
 import aiofiles
-from models import OllamaRequest, OllamaResponse
-from config import redis_client, NOT_FOUND
+from models import OllamaResponse
+from config import redis_client, NOT_FOUND, USE_DR_AGENT
 from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData, custom_tds
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
