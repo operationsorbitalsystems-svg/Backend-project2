@@ -32,6 +32,10 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_DEFAULT_REGION }}
           AWS_BEDROCK_API_KEY: ${{ secrets.AWS_BEDROCK_API_KEY }}
           BEDROCK_MODEL_ID: ${{ secrets.BEDROCK_MODEL_ID }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+
         with:
           host: ${{ secrets.SERVER_IP }}
           username: ubuntu
@@ -81,6 +85,10 @@ jobs:
               echo "AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
               echo "AWS_BEDROCK_API_KEY=${AWS_BEDROCK_API_KEY}"
               echo "BEDROCK_MODEL_ID=${BEDROCK_MODEL_ID}"
+              echo "LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY}"
+              echo "LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY}"
+              echo "LANGFUSE_BASE_URL=${LANGFUSE_BASE_URL}"
+
             } > /opt/backend/.env
             chmod 600 /opt/backend/.env
 
