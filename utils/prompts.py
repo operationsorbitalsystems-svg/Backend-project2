@@ -170,26 +170,26 @@ def build_system_prompt_agent(invoice_description: str, vendor_name: Optional[st
     ━━━ AVAILABLE TOOLS ━━━
 
     get_children — See the immediate children of any node you are at.
-    Input:  {{"path": ["Expenses", "some folder"]}}
+    Input:  {{"tool": "get_children", "input":{{"path": ["Expenses", "some folder"]}} }}
     Output: list of children with name, type (leaf/folder), state, leaf_count
 
     navigate_to — Move into a node OR backtrack to a parent/sibling you have seen before.
-    Input:  {{"path": ["Expenses", "some folder"]}}
+    Input: {{"tool": "navigate_to", "input": {{"path": ["Expenses", "some folder"]}} }}
     Cannot navigate to EXHAUSTED or DISCARDED nodes.
 
     update_node_states — Mark nodes as DISCARDED (skip by name) or EXHAUSTED (explored, empty).
-    Input:  {{"updates": [{{"path": ["Expenses", "X"], "state": "DISCARDED"}}, ...]}}
+    Input: {{"tool": "update_node_states", "input": {{"updates": [{{"path": ["Expenses", "X"], "state": "DISCARDED"}}, ...]}} }}
     Discard irrelevant branches immediately to save turns.
 
     get_leaf_nodes — Get ALL leaf names under a path in one call.
-    Input:  {{"path": ["Expenses", "some folder"]}}
+    Input: {{"tool": "get_leaf_nodes", "input": {{"path": ["Expenses", "some folder"]}} }}
     Use this once you are confident you are in the right subtree.
 
     get_unexplored_paths — See everything still left to try. Use when unsure what's next.
-    Input:  {{}}
+    Input:{{"tool": "get_unexplored_paths", "input":  {{}} }}
 
     select_leaf — YOUR FINAL ANSWER. Only call when certain.
-    Input:  {{"path": ["Expenses", "...", "...", "direct parent folder"], "leaf_name": "Exact Leaf Name"}}
+    Input: {{"tool": "select_leaf", "input": {{"path": ["Expenses", "...", "...", "direct parent folder"], "leaf_name": "Exact Leaf Name"}} }}
     
     CRITICAL: `path` must be the COMPLETE path from "Expenses" down to the 
     IMMEDIATE parent folder of the leaf. Every intermediate folder must be 
@@ -201,10 +201,21 @@ def build_system_prompt_agent(invoice_description: str, vendor_name: Optional[st
     
     Correct call:
     {{
-        "path": ["Expenses", "Indirect Expenses", "Other Indirect Expenses", 
-                "Selling and Distribution Expenses", "Distribution Expenses"],
-        "leaf_name": "Freight Outward ? General"
+        "tool" : "select_leaf",
+        "input" :    {{
+            "path": ["Expenses", "Indirect Expenses", "Other Indirect Expenses", 
+                    "Selling and Distribution Expenses", "Distribution Expenses"],
+            "leaf_name": "Freight Outward ? General"
+        }}
     }}
+    
+    
+    Wrong tool call:
+        WRONG — missing "tool" key:      {{"input": {{"path": ["Expenses"]}}}}
+        WRONG — missing "input" key:     {{"tool": "get_children", "path": ["Expenses"]}}
+        WRONG — duplicate Expenses root + no tool key and input key wrapper: {{"path": ["Expenses", "Expenses", "..."]}}
+        WRONG — leaf included in path + no tool key and input key wrapper:   {{"path": ["Expenses", "...", "Leaf Name"], "leaf_name": "Leaf Name"}}
+
 
     ━━━ NODE STATES ━━━
     UNEXPLORED  → Seen but not entered. Should explore.
@@ -223,6 +234,7 @@ def build_system_prompt_agent(invoice_description: str, vendor_name: Optional[st
 
     BEGIN: Call get_children with path ["Expenses"] now.
     """
+
 
 
 
