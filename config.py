@@ -38,6 +38,8 @@ RETRYABLE_CODES_AGENT = {
     "ModelNotReadyException",
 }
 
+BEDROCK_AGENT_MODEL_ID=os.getenv("BEDROCK_AGENT_MODEL_ID")
+
 
 
 

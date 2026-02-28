@@ -30,7 +30,7 @@ from langfuse import get_client
 import random
 import asyncio
 
-from config import BEDROCK_MODEL_ID as MODEL_ID
+from config import BEDROCK_AGENT_MODEL_ID as MODEL_ID
 from config import bedrock_semaphore
 from .memory import initialize_memory, is_done
 from .tools import execute_tool
