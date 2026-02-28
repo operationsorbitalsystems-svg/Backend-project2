@@ -95,6 +95,7 @@ jobs:
             } > /opt/backend/.env
             chmod 600 /opt/backend/.env
 
+
             # ── 5. Create systemd service (first deploy only) ─────────────────
             if [ ! -f /etc/systemd/system/backend.service ]; then
               sudo tee /etc/systemd/system/backend.service > /dev/null << 'SERVICEEOF'
