@@ -189,7 +189,7 @@ class AgentQueue:
 
     # ── Worker loop ───────────────────────────────────────────────────────────
 
-    async def worker_loop(self):
+    async def worker_loop(self, worker_id:int):
         """
         Single worker coroutine.  Spawn multiple of these for parallelism:
 
