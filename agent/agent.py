@@ -216,7 +216,7 @@ async def run_agent(
                 )
                 
 
-            logger.info(f"\n[Turn {turn}] Model:\n{model_text[:500]}")
+            logger.debug(f"\n[Turn {turn}] Model:\n{model_text[:500]}")
 
             # Add assistant turn to history
             messages.append({

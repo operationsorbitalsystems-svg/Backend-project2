@@ -283,6 +283,7 @@ class TaskQueueManager:
                 line_item=narration,
                 file_name=task.filename,
                 expenses_tree=expenses_tree,
+                vendor_name=task.vendor_name
             )
             response = await self.agent_queue.wait_for_response(enqueued_id, timeout=600)
         except TimeoutError:
