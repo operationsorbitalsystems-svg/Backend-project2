@@ -29,6 +29,7 @@ from botocore.exceptions import ClientError
 from langfuse import get_client
 
 from config import BEDROCK_MODEL_ID as MODEL_ID
+from config import bedrock_semaphore
 from .memory import initialize_memory, is_done
 from .tools import execute_tool
 from utils.logger import setup_logger
@@ -95,7 +96,7 @@ def _format_tool_result(tool_name: str, result: Dict[str, Any]) -> str:
 
 # ── Agentic loop ──────────────────────────────────────────────────────────────
 
-def run_agent(
+async def run_agent(
     invoice_description: str,
     expense_tree: Dict[str, Any],
     batch_id: str,
@@ -155,15 +156,17 @@ def run_agent(
                 model=MODEL_ID,
                 input=messages,
             ) as gen_span:
-                try:
-                    response = bedrock_client.converse(
-                        modelId=MODEL_ID,
-                        system=[{"text": system_prompt}],
-                        messages=messages,
-                        inferenceConfig={"maxTokens": 1024, "temperature": 0.0},
-                    )
-                except ClientError as e:
-                    raise RuntimeError(f"Bedrock API error on turn {turn}: {e}") from e
+                
+                async with bedrock_semaphore:
+                    try:
+                        response = bedrock_client.converse(
+                            modelId=MODEL_ID,
+                            system=[{"text": system_prompt}],
+                            messages=messages,
+                            inferenceConfig={"maxTokens": 1024, "temperature": 0.0},
+                        )
+                    except ClientError as e:
+                        raise RuntimeError(f"Bedrock API error on turn {turn}: {e}") from e
 
                 output_message = response["output"]["message"]
 
@@ -183,14 +186,6 @@ def run_agent(
                     },
                 )
                 
-        #                 output_message = response["output"]["message"]
-
-        # # ── Extract token usage from Bedrock response ──────────────────────
-        # usage = response.get("usage", {})
-        # input_tokens  = usage.get("inputTokens", 0)
-        # output_tokens = usage.get("outputTokens", 0)
-        # total_input_tokens  += input_tokens
-        # total_output_tokens += output_tokens
 
             logger.info(f"\n[Turn {turn}] Model:\n{model_text[:500]}")
 

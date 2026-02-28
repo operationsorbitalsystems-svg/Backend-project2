@@ -22,6 +22,7 @@ from .session_manager import RedisSessionManager
 from .mistral_queue import MistralQueueManager
 from .llm_queue import LLMQueue
 from .file_handler import FileHandler
+from agent.agent_qeue import AgentQueue
 
 logger = setup_logger()
 
@@ -35,7 +36,7 @@ class TaskQueueManager:
     in round-robin fashion, preventing any single user from monopolizing workers.
     """
 
-    def __init__(self, redis_client: Redis, mistral_queue: MistralQueueManager, llm_queue: LLMQueue=None, session_manager : RedisSessionManager =None, file_handler: FileHandler =None):
+    def __init__(self, redis_client: Redis, mistral_queue: MistralQueueManager, llm_queue: LLMQueue=None, session_manager : RedisSessionManager =None, file_handler: FileHandler =None, agent_queue: AgentQueue = None):
         if redis_client is None:
             raise ValueError("Redis client is required for task queue. Set REDIS_ENABLED=true")
 
@@ -44,7 +45,8 @@ class TaskQueueManager:
         self.session_manager = session_manager if session_manager is not None else get_session_manager()
         self.file_handler = file_handler if file_handler is not None else FileHandler()
         self.llm_queue = llm_queue if llm_queue is not None else get_llm_queue()
-
+        self.agent_queue = agent_queue
+        
         # Redis key patterns
         self.PENDING_QUEUE_PREFIX = "queue:pending:"
         self.ACTIVE_BATCHES_KEY = "queue:active_batches"

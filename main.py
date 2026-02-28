@@ -10,7 +10,7 @@ import logging
 # ── Logging must be configured FIRST, before any service module imports ───────
 from config import DEBUG, LOG_LEVEL, CORS_ORIGINS, HOST, PORT, MAX_FILES_PER_BATCH, MAX_MISTRAL_CONCURRENT, MAX_MAIN_WORKERS, redis_client, CLEANUP_BATCH_HOURS, CLEANUP_AGE
 from utils.logger import configure_logging, setup_logger, batch_id_var
-
+from agent.agent_qeue import AgentQueue, get_agent_queue
 configure_logging(debug=DEBUG)
 
 from utils.tds import MANAGER
@@ -68,6 +68,9 @@ session_manager = get_session_manager()
 file_handler = FileHandler()
 invoice_parser = InvoiceParser()
 
+agent_queue = get_agent_queue()
+
+
 # Initialize Mistral queue
 mistral_queue = MistralQueueManager(
     redis_client=redis_client,
@@ -84,7 +87,8 @@ task_queue = TaskQueueManager(
     mistral_queue=mistral_queue,
     llm_queue=llm_queue,
     session_manager=session_manager,
-    file_handler=file_handler
+    file_handler=file_handler,
+    agent_queue=agent_queue
 )
 
 logger.info(f"Invoice Parser Backend Started - Debug: {DEBUG}, Log Level: {LOG_LEVEL}")
@@ -501,6 +505,8 @@ async def startup_event():
     # Recover crashed tasks from all queues
     await task_queue.recover_crashed_tasks()
     await mistral_queue.recover_crashed_tasks()
+    await agent_queue.recover_crashed_tasks()
+    
     logger.info("✅ Recovered crashed tasks from all queues")
 
     # Start Mistral worker pool
@@ -510,6 +516,9 @@ async def startup_event():
     # Start main task queue worker pool
     await task_queue.start_workers(num_workers=MAX_MAIN_WORKERS)
     logger.info(f"✅ Started {MAX_MAIN_WORKERS} main task queue workers")
+    
+    await agent_queue.start_workers()
+    logger.info(f"✅ Started 5 agent task queue workers")
 
     # Start LLM worker pool
     from config import MAX_OLLAMA_CONCURRENT_CALLS

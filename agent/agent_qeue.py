@@ -36,43 +36,17 @@ Usage:
 """
 
 import asyncio
-from datetime import datetime
-from typing import Any, Dict, List, Optional
-from uuid import uuid4
-
-from pydantic import BaseModel
+from datetime import datetime, UTC
+from typing import Any, Dict, Optional
 
 from config import redis_client
 from utils.logger import setup_logger, batch_id_var
 from .agent import run_agent          # the existing agentic loop
-
+from models import AgentRequest, AgentResponse
 from redis import Redis
-
+import json
 logger = setup_logger()
 
-
-# ── Data models ───────────────────────────────────────────────────────────────
-
-class AgentRequest(BaseModel):
-    task_id: str
-    batch_id: str
-    line_item: str                       # invoice line item description
-    expenses_tree: Dict[str, Any]           # COA Expenses subtree (JSON-serialisable)
-    vendor_name: Optional[str] = None
-    enqueued_at: str
-    metadata: Dict[str, Any] = {}
-    file_name: str
-
-
-class AgentResponse(BaseModel):
-    task_id: str
-    batch_id: str
-    line_item: str
-    selected_leaf: Optional[str]            # None on failure
-    success: bool
-    error: Optional[str] = None
-    completed_at: Optional[str] = None
-    metadata: Dict[str, Any] = {}
 
 
 # ── Queue ─────────────────────────────────────────────────────────────────────
@@ -181,13 +155,10 @@ class AgentQueue:
         run_agent() is synchronous (boto3 + blocking I/O), so we
         offload it to a thread to avoid blocking the event loop.
         """
-        loop = asyncio.get_event_loop()
         try:
-            selected_leaf = await loop.run_in_executor(
-                None,               # default ThreadPoolExecutor
-                run_agent,          # the existing agent entry point
+            selected_leaf = await run_agent(
                 request.line_item,
-                request.expenses_tree,  # passed through to run_agent
+                request.expenses_tree,
                 request.batch_id,
                 request.task_id,
                 request.vendor_name,
@@ -276,14 +247,24 @@ class AgentQueue:
                 if _ctx_token is not None:
                     batch_id_var.reset(_ctx_token)
 
-    def start_workers(self, n: int = 5):
-        """
-        Spawn `n` worker coroutines as background Tasks — returns immediately.
-        NOT async. Call it plain: agent_queue.start_workers(3)
-        """
-        logger.info(f"🚀 Starting {n} AgentQueue workers")
-        for i in range(n):
-            asyncio.create_task(self.worker_loop(), name=f"agent-worker-{i}")
+    # def start_workers(self, n: int = 5):
+    #     """
+    #     Spawn `n` worker coroutines as background Tasks — returns immediately.
+    #     NOT async. Call it plain: agent_queue.start_workers(3)
+    #     """
+    #     logger.info(f"🚀 Starting {n} AgentQueue workers")
+    #     for i in range(n):
+    #         asyncio.create_task(self.worker_loop(), name=f"agent-worker-{i}")
+
+
+    async def start_workers(self, num_workers: int = 5):
+        """Start worker pool"""
+        logger.info(f"Starting {num_workers} agent task queue workers")
+
+        for worker_id in range(1, num_workers + 1):
+            asyncio.create_task(self.worker_loop(worker_id))
+
+        logger.info(f"✅ All {num_workers} agent task queue workers started")
 
     # ── Response retrieval ────────────────────────────────────────────────────
 
@@ -336,6 +317,66 @@ class AgentQueue:
             "pending": pending,
             "processing": processing,
         }
+        
+
+    async def recover_crashed_tasks(self):
+        """
+        Recover tasks that were processing when server crashed.
+
+        Marks them as failed in Redis and cleans up processing keys.
+        Called on startup.
+        """
+        logger.info("Recovering crashed Mistral tasks...")
+
+        recovered_count = 0
+        cursor = 0
+
+        while True:
+            # Scan for processing keys (non-blocking)
+            cursor, keys = await self.redis.scan(
+                cursor=cursor,
+                match=f"{self.PROCESSING_PREFIX}*",
+                count=100
+            )
+
+            for key in keys:
+                try:
+                    task_json = await self.redis.get(key)
+                    if task_json:
+                        task_dict = json.loads(task_json)
+                        task = AgentRequest(**task_dict)
+
+                        # Mark as failed due to crash
+                        response = AgentResponse(
+                            task_id=task.task_id,
+                            batch_id=task.batch_id,
+                            selected_leaf= None,
+                            line_item= "",          
+                            success=False,
+                            error="Server restarted during processing",
+                            completed_at=datetime.now(UTC).isoformat()
+                        )
+
+                        await self.redis.setex(
+                            f"{self.RESPONSE_PREFIX}{task.task_id}",
+                            1800,
+                            response.model_dump_json()
+                        )
+
+                        # Delete processing key
+                        await self.redis.delete(key)
+
+                        recovered_count += 1
+                        logger.info(f"Recovered crashed Agent task: {task.batch_id}")
+
+                except Exception as e:
+                    logger.error(f"Error recovering Agent task from {key}: {e}")
+
+            if cursor == 0:
+                break
+
+        logger.info(f"Recovered {recovered_count} crashed Agent tasks")
+
 
 
 # ── Singleton ─────────────────────────────────────────────────────────────────

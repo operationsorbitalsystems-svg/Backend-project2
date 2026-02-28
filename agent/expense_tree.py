@@ -1,7 +1,7 @@
 
 from typing import Dict, Any
 from pathlib import Path
-from coa_utils.main import parse_coa
+from coa_parser import parse_coa
 
 
 
