@@ -6,7 +6,8 @@ from datetime import datetime
 from uuid import uuid4
 from pydantic import BaseModel
 import aiofiles
-from config import redis_client, MAX_MISTRAL_CONCURRENT, NOT_FOUND
+from models import OllamaRequest, OllamaResponse
+from config import redis_client, NOT_FOUND
 from models import TaskItem, ProcessedInvoiceResult, custom_ledger, InvoiceData, custom_tds
 from services.session_manager import get_session_manager
 from services.file_handler import FileHandler
@@ -225,373 +226,7 @@ class TaskQueueManager:
 
         except Exception as e:
             logger.exception("Failed to extract Sundry Creditors ledgers")
-            raise e
-
-
-    async def worker_loop(self, worker_id: int):
-        """
-        Main invoice processing workflow.
-        Mistral OCR → Ollama ledger selections → Multi-row XL generation → Save
-
-        Args:
-            worker_id: Unique identifier for this worker
-        """
-        logger.info(f"Worker {worker_id} started")
-
-        while True:
-            _ctx_token = None
-            try:
-                # Get next task (round-robin)
-                task = await self.get_next_task_round_robin()
-
-                if task is None:
-                    # No tasks available, wait briefly
-                    await asyncio.sleep(1)
-                    continue
-
-                _ctx_token = batch_id_var.set(task.batch_id)
-
-                logger.info(
-                    f"Worker {worker_id} processing {task.filename} "
-                    f"(batch: {task.batch_id}, task: {task.task_id})"
-                )
-
-                # Update file status to "processing"
-                self.session_manager.update_file_status(
-                    task.batch_id,
-                    task.filename,
-                    "processing"
-                )
-
-                # === STEP 1: Enqueue to Mistral Queue (NON-BLOCKING) ===
-                mistral_task_id = await self.mistral_queue.enqueue_request(
-                    batch_id=task.batch_id,
-                    filename=task.filename,
-                    pdf_path=task.pdf_path
-                )
-
-                # === STEP 2: Wait for Mistral Result (BLOCKING) ===
-                try:
-                    mistral_response = await self.mistral_queue.wait_for_response(
-                        task_id=mistral_task_id,
-                        timeout=120  # 2 minutes
-                    )
-                except TimeoutError:
-                    logger.error(f"Worker {worker_id} Mistral OCR timeout for {task.filename}")
-                    self.session_manager.update_file_status(
-                        task.batch_id,
-                        task.filename,
-                        "failed",
-                        error="Mistral OCR timeout"
-                    )
-                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-                    continue
-
-                if not mistral_response.success:
-                    logger.error(f"Worker {worker_id} Mistral OCR failed for {task.filename}: {mistral_response.error_message}")
-                    self.session_manager.update_file_status(
-                        task.batch_id,
-                        task.filename,
-                        "failed",
-                        error=f"Mistral OCR failed: {mistral_response.error_message}"
-                    )
-                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-                    continue
-
-                # Load InvoiceData from JSON file
-                json_path = mistral_response.json_path
-                try:
-                    async with aiofiles.open(json_path, 'r') as f:
-                        json_content = await f.read()
-                    invoice_dict = json.loads(json_content)
-                    invoice_data = InvoiceData.model_validate(invoice_dict)
-                except Exception as e:
-                    logger.error(f"Worker {worker_id} failed to load invoice data from {json_path}: {e}")
-                    self.session_manager.update_file_status(
-                        task.batch_id,
-                        task.filename,
-                        "failed",
-                        error=f"Failed to load invoice data: {e}"
-                    )
-                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-                    continue
-
-                logger.info(f"Worker {worker_id} Mistral OCR completed for {task.filename}")
-
-                # === STEP 2a: Prepare Expense Ollama Request ===
-                # expense_ledgers = await self._load_expense_ledgers_from_coa(task.batch_id)
-
-                expense_ledgers = self.get_or_load_expense_leaves(task.batch_id)
-                narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
-                                    
-                custom_schema_expense = custom_ledger(expense_ledgers)
-                
-                expense_ledgers = set(expense_ledgers)
-
-
-                expense_ledgers.add(NOT_FOUND)
-
-                expense_system_prompt, expense_user_prompt = ledger_name_prompt_dr(
-                    ledger_narration= narration,
-                    expense_leaf_nodes=expense_ledgers
-                    
-                )
-                
-                logger.debug(f"Worker {worker_id} Expenses Array is : {expense_ledgers}")
-
-
-                # === STEP 2b: Prepare Vendor Ollama Request ===
-                # liability_pattern = re.compile(r'(?i)\bliabilit(y|ies)\b')
-                # liability_ledgers = self.get_or_load_expense_leaves(task.batch_id, liability_pattern)
-                liability_ledgers = self.get_sundry_creditor_ledgers(task.batch_id)
-                vendor_name = invoice_data.header.vendor_name
-
-                custom_schema_liability = custom_ledger(liability_ledgers)
-                
-                liability_ledgers = set(liability_ledgers)
-                
-                liability_ledgers.add(NOT_FOUND)
-
-                vendor_system_prompt, vendor_user_prompt = ledger_name_prompt_cr(
-                    vendor_name=vendor_name,
-                    invoice_description=narration,
-                    liability_leaf_nodes=liability_ledgers
-                )
-                
-                
-                # REMOVE THIS BEFORE PROD
-                logger.debug(f"Worker {worker_id} Liabilities Array is : {liability_ledgers}")
-
-                
-                # === STEP 2c: TDS Prep ===
-                tds_set = MANAGER.get_all_transaction_natures()
-                
-                custom_schema_tds = custom_tds(tds_set)
-                
-                tds_system_prompt, tds_user_prompt = tds_nature_prompt(
-                    vendor_name=vendor_name,
-                    ledger_narration=narration,
-                    tds_nature_options=tds_set
-                    
-                )
-                
-                #REMOVE THIS BEFORE PROD
-                logger.debug(f"Worker {worker_id} TDS Set is : {tds_set}")
-               
-
-                # === STEP 3: Enqueue BOTH(+ TDS) LLM Tasks (NON-BLOCKING) ===
-                expense_task_id = await self.llm_queue.enqueue_request(
-                    batch_id=task.batch_id,
-                    system_prompt=expense_system_prompt,
-                    user_prompt=expense_user_prompt,
-                    metadata={
-                        "type": "expense_selection",
-                        "filename": task.filename,
-                        "pydantic_json_schema": custom_schema_expense.model_json_schema()
-                    }
-                )
-
-                vendor_task_id = await self.llm_queue.enqueue_request(
-                    batch_id=task.batch_id,
-                    system_prompt=vendor_system_prompt,
-                    user_prompt=vendor_user_prompt,
-                    metadata={
-                        "type": "vendor_selection",
-                        "filename": task.filename,
-                        "pydantic_json_schema": custom_schema_liability.model_json_schema()
-                    }
-                )
-                
-                tds_task_id = await self.llm_queue.enqueue_request(
-                    batch_id=task.batch_id,
-                    system_prompt=tds_system_prompt,
-                    user_prompt=tds_user_prompt,
-                    metadata={
-                        "type": "expense_selection",
-                        "filename": task.filename,
-                        "pydantic_json_schema": custom_schema_tds.model_json_schema()
-                    }
-                )
-
-                # === STEP 4: Wait for ALL LLM Results in Parallel ===
-                # Use gather with return_exceptions=True to handle individual failures
-                results = await asyncio.gather(
-                    self.llm_queue.wait_for_response(expense_task_id, timeout=60),
-                    self.llm_queue.wait_for_response(vendor_task_id, timeout=60),
-                    self.llm_queue.wait_for_response(tds_task_id, timeout=60),
-                    return_exceptions=True
-                )
-
-                expense_response = results[0]
-                vendor_response = results[1]
-                tds_response = results[2]
-                
-                logger.info(f"Output For TDS Was : {tds_response}")
-
-                # === STEP 5: Parse Expense Ledger (with fallback) ===
-                if isinstance(expense_response, Exception) or isinstance(expense_response, TimeoutError):
-                    logger.error(f"Worker {worker_id} LLM timeout/error for expense ledger: {task.filename}")
-                    expense_ledger_name = NOT_FOUND
-                    expense_confidence = 0.0
-                elif not expense_response.success:
-                    logger.error(f"Worker {worker_id} No Ledger name for Expense through LLM")
-                    expense_ledger_name = NOT_FOUND
-                    expense_confidence = 0.0
-                else:
-                    expense_ledger_name, expense_confidence = self._parse_ledger_response(
-                        expense_response.response_text, expense_ledgers,
-                        get_pydantic_schema=custom_schema_expense,
-                        worker_id = worker_id
-                    )
-                    if not expense_ledger_name:
-                        expense_ledger_name = NOT_FOUND
-                        expense_confidence = 0.0
-
-                logger.info(f"Worker {worker_id} Expense ledger: {expense_ledger_name} (confidence: {expense_confidence:.2f})")
-
-                # === STEP 6: Parse Vendor Ledger (with fallback) ===
-                if isinstance(vendor_response, Exception) or isinstance(vendor_response, TimeoutError):
-                    logger.error(f"Worker {worker_id} Ollama timeout/error for vendor ledger: {task.filename}")
-                    vendor_ledger_name = NOT_FOUND
-                    vendor_confidence = 0.0
-                elif not vendor_response.success:
-                    logger.error(f"Worker {worker_id} No Ledger name for Vendor through Ollama")
-                    vendor_ledger_name = NOT_FOUND
-                    vendor_confidence = 0.0
-                else:
-                    vendor_ledger_name, vendor_confidence = self._parse_ledger_response(
-                        vendor_response.response_text, liability_ledgers,
-                        get_pydantic_schema=custom_schema_liability,
-                        worker_id = worker_id
-                    )
-                    if not vendor_ledger_name:
-                        vendor_ledger_name = NOT_FOUND
-                        vendor_confidence = 0.0
-
-                logger.info(f"Worker {worker_id} Vendor ledger: {vendor_ledger_name} (confidence: {vendor_confidence:.2f})")
-
-
-                # === STEP 7: TDS With Fallback ===
-
-                
-                if isinstance(tds_response, Exception) or isinstance(tds_response, TimeoutError):
-                    logger.error(f"Worker {worker_id} Ollama timeout/error for tds ledger: {task.filename}")
-                    tds_ledger_name = NOT_FOUND
-                    tds_confidence = 0.0
-                elif not tds_response.success:
-                    logger.error(f"Worker {worker_id} No Ledger name for TDS through Ollama")
-                    tds_ledger_name = NOT_FOUND
-                    tds_confidence = 0.0
-                else:
-                    tds_ledger_name, tds_confidence = self._parse_ledger_response(
-                        tds_response.response_text, list(tds_set),
-                        get_pydantic_schema=custom_schema_tds,
-                        worker_id = worker_id
-                    )
-                    if not tds_ledger_name:
-                        tds_ledger_name = NOT_FOUND
-                        tds_confidence = 0.0
-
-                logger.info(f"Worker {worker_id} TDS Ledger: {tds_ledger_name} (confidence: {tds_confidence:.2f})")
-
-
-                if tds_ledger_name == NOT_FOUND:
-                    tds_ledger_name = None
-                    tds_confidence = 0
-
-                # === STEP 8: Generate Multi-Row XL Output ===
-                voucher_number = await self._get_next_voucher_number(task.batch_id)
-
-                xl_rows = XLOutputGenerator.generate_xl_output_rows(
-                    invoice_data=invoice_data,
-                    expense_ledger_name=expense_ledger_name,
-                    vendor_ledger_name=vendor_ledger_name,
-                    expense_confidence=expense_confidence,
-                    vendor_confidence=vendor_confidence,
-                    voucher_number=voucher_number,
-                    tds_section= tds_ledger_name,
-                    tds_confidence=tds_confidence
-                )
-
-                logger.info(f"Worker {worker_id} generated {len(xl_rows)} XL rows for {task.filename} with voucher #{voucher_number}")
-
-                # === STEP 8: Save Results ===
-                # Save invoice JSON
-                json_path = self.file_handler.get_json_path(task.batch_id, task.filename)
-                success, saved_json_path = self.file_handler.save_json_result(
-                    task.batch_id,
-                    task.filename,
-                    invoice_data.model_dump()
-                )
-
-                # Update session with results
-                result = ProcessedInvoiceResult(
-                    filename=task.filename,
-                    pdf_path=task.pdf_path,
-                    json_path=json_path,
-                    status="success",
-                    invoice_number=invoice_data.header.invoice_number,
-                    vendor_name=invoice_data.header.vendor_name,
-                    total_amount=invoice_data.total_amount,
-                    currency=invoice_data.currency,
-                    line_items_count=len(invoice_data.line_items),
-                    xl_output=[row.model_dump() for row in xl_rows],
-                    data=invoice_data,
-                    timestamp=datetime.utcnow().isoformat()
-                )
-
-                session = self.session_manager.get_session(task.batch_id)
-                if session:
-                    processed_results_raw = session.get("processed_results", [])
-
-                    # Parse if it's a JSON string (Redis case)
-                    if isinstance(processed_results_raw, str):
-                        try:
-                            processed_results = json.loads(processed_results_raw)
-                        except (json.JSONDecodeError, TypeError):
-                            processed_results = []
-                    else:
-                        processed_results = processed_results_raw if isinstance(processed_results_raw, list) else []
-
-                    # Append result and update session
-                    processed_results.append(result.model_dump())
-                    self.session_manager.update_session(task.batch_id, {"processed_results": processed_results})
-
-                # Update file status to completed
-                self.session_manager.update_file_status(
-                    task.batch_id,
-                    task.filename,
-                    "success"
-                )
-
-                logger.info(f"✅ Worker {worker_id} completed {task.filename}: {len(xl_rows)} XL rows generated")
-
-                # Remove from processing set
-                await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-            
-            except Exception as e:
-                import traceback
-                logger.error(f"Worker {worker_id} error: {str(e)}")
-                logger.error(f"Traceback: {traceback.format_exc()}")
-
-                # Update file status to failed if we have task info
-                if task:
-                    self.session_manager.update_file_status(
-                        task.batch_id,
-                        task.filename,
-                        "failed",
-                        error=str(e)
-                    )
-
-                    # Clean up processing task from Redis
-                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
-
-                await asyncio.sleep(1)
-
-            finally:
-                if _ctx_token is not None:
-                    batch_id_var.reset(_ctx_token)
-                
+            raise e        
 
     def _parse_ledger_response(self, response_text: str, valid_ledgers: List[str], worker_id: str = None, get_pydantic_schema: BaseModel = None) -> Tuple[str, float]:
         """
@@ -733,6 +368,238 @@ class TaskQueueManager:
                 logger.error(f"Error recovering task from key {key}: {e}")
 
         logger.info(f"Recovered {recovered_count} crashed tasks")
+
+
+
+
+    async def worker_loop(self, worker_id: int):
+        """Main invoice processing workflow orchestrator."""
+        logger.info(f"Worker {worker_id} started")
+
+        while True:
+            _ctx_token = None
+            task = None
+            try:
+                task = await self.get_next_task_round_robin()
+                if task is None:
+                    await asyncio.sleep(1)
+                    continue
+
+                _ctx_token = batch_id_var.set(task.batch_id)
+                logger.info(f"Worker {worker_id} processing {task.filename} (batch: {task.batch_id}, task: {task.task_id})")
+
+                invoice_data = await self._run_ocr_step(worker_id, task)
+                if invoice_data is None:
+                    continue
+
+                expense_ledger_name, expense_confidence, \
+                vendor_ledger_name, vendor_confidence, \
+                tds_ledger_name, tds_confidence = await self._run_llm_step(worker_id, task, invoice_data)
+
+                await self._finalize_and_save(
+                    worker_id, task, invoice_data,
+                    expense_ledger_name, expense_confidence,
+                    vendor_ledger_name, vendor_confidence,
+                    tds_ledger_name, tds_confidence
+                )
+
+            except Exception as e:
+                import traceback
+                logger.error(f"Worker {worker_id} error: {str(e)}")
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                if task:
+                    self.session_manager.update_file_status(task.batch_id, task.filename, "failed", error=str(e))
+                    await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
+                await asyncio.sleep(1)
+
+            finally:
+                if _ctx_token is not None:
+                    batch_id_var.reset(_ctx_token)
+
+
+    async def _run_ocr_step(self, worker_id: int, task: TaskItem) -> InvoiceData | None:
+        """
+        Step 1 & 2: Send PDF to Mistral OCR queue and return parsed InvoiceData.
+        Returns None and marks task failed if OCR fails.
+        """
+        self.session_manager.update_file_status(task.batch_id, task.filename, "processing")
+
+        mistral_task_id = await self.mistral_queue.enqueue_request(
+            batch_id=task.batch_id,
+            filename=task.filename,
+            pdf_path=task.pdf_path
+        )
+
+        try:
+            mistral_response = await self.mistral_queue.wait_for_response(task_id=mistral_task_id, timeout=120)
+        except TimeoutError:
+            logger.error(f"Worker {worker_id} Mistral OCR timeout for {task.filename}")
+            await self._fail_task(task, "Mistral OCR timeout")
+            return None
+
+        if not mistral_response.success:
+            logger.error(f"Worker {worker_id} Mistral OCR failed for {task.filename}: {mistral_response.error_message}")
+            await self._fail_task(task, f"Mistral OCR failed: {mistral_response.error_message}")
+            return None
+
+        try:
+            async with aiofiles.open(mistral_response.json_path, 'r') as f:
+                json_content = await f.read()
+            invoice_data = InvoiceData.model_validate(json.loads(json_content))
+            logger.info(f"Worker {worker_id} Mistral OCR completed for {task.filename}")
+            return invoice_data
+        except Exception as e:
+            logger.error(f"Worker {worker_id} failed to load invoice data from {mistral_response.json_path}: {e}")
+            await self._fail_task(task, f"Failed to load invoice data: {e}")
+            return None
+
+
+    async def _run_llm_step(self, worker_id: int, task: TaskItem, invoice_data: InvoiceData):
+        """
+        Steps 2a–4: Build prompts for expense/vendor/TDS, enqueue to LLM queue,
+        await all three in parallel, and parse results.
+        Returns a 6-tuple: (expense_name, expense_conf, vendor_name, vendor_conf, tds_name, tds_conf)
+        """
+        narration = XLOutputGenerator.concatenate_line_items(invoice_data.line_items)
+        vendor_name = invoice_data.header.vendor_name
+
+        # Prepare schemas and prompts
+        expense_ledgers = self.get_or_load_expense_leaves(task.batch_id)
+        custom_schema_expense = custom_ledger(expense_ledgers)
+        expense_ledgers_set = set(expense_ledgers) | {NOT_FOUND}
+        expense_sys, expense_usr = ledger_name_prompt_dr(ledger_narration=narration, expense_leaf_nodes=expense_ledgers_set)
+
+        liability_ledgers = self.get_sundry_creditor_ledgers(task.batch_id)
+        custom_schema_liability = custom_ledger(liability_ledgers)
+        liability_ledgers_set = set(liability_ledgers) | {NOT_FOUND}
+        vendor_sys, vendor_usr = ledger_name_prompt_cr(vendor_name=vendor_name, invoice_description=narration, liability_leaf_nodes=liability_ledgers_set)
+
+        tds_set = MANAGER.get_all_transaction_natures()
+        custom_schema_tds = custom_tds(tds_set)
+        tds_sys, tds_usr = tds_nature_prompt(vendor_name=vendor_name, ledger_narration=narration, tds_nature_options=tds_set)
+
+        logger.debug(f"Worker {worker_id} Expenses: {expense_ledgers_set}")
+        logger.debug(f"Worker {worker_id} Liabilities: {liability_ledgers_set}")
+        logger.debug(f"Worker {worker_id} TDS: {tds_set}")
+
+        # Enqueue all three concurrently
+        expense_task_id = await self.llm_queue.enqueue_request(
+            batch_id=task.batch_id, system_prompt=expense_sys, user_prompt=expense_usr,
+            metadata={"type": "expense_selection", "filename": task.filename, "pydantic_json_schema": custom_schema_expense.model_json_schema()}
+        )
+        vendor_task_id = await self.llm_queue.enqueue_request(
+            batch_id=task.batch_id, system_prompt=vendor_sys, user_prompt=vendor_usr,
+            metadata={"type": "vendor_selection", "filename": task.filename, "pydantic_json_schema": custom_schema_liability.model_json_schema()}
+        )
+        tds_task_id = await self.llm_queue.enqueue_request(
+            batch_id=task.batch_id, system_prompt=tds_sys, user_prompt=tds_usr,
+            metadata={"type": "expense_selection", "filename": task.filename, "pydantic_json_schema": custom_schema_tds.model_json_schema()}
+        )
+
+        # Await all in parallel
+        results = await asyncio.gather(
+            self.llm_queue.wait_for_response(expense_task_id, timeout=60),
+            self.llm_queue.wait_for_response(vendor_task_id, timeout=60),
+            self.llm_queue.wait_for_response(tds_task_id, timeout=60),
+            return_exceptions=True
+        )
+        expense_response, vendor_response, tds_response = results
+        logger.info(f"Worker {worker_id} TDS raw response: {tds_response}")
+
+        # Parse results
+        expense_name, expense_conf = self._safe_parse_ledger(expense_response, expense_ledgers_set, custom_schema_expense, worker_id, "expense")
+        vendor_name_result, vendor_conf = self._safe_parse_ledger(vendor_response, liability_ledgers_set, custom_schema_liability, worker_id, "vendor")
+        tds_name, tds_conf = self._safe_parse_ledger(tds_response, list(tds_set), custom_schema_tds, worker_id, "tds")
+
+        logger.info(f"Worker {worker_id} Expense ledger: {expense_name} ({expense_conf:.2f})")
+        logger.info(f"Worker {worker_id} Vendor ledger: {vendor_name_result} ({vendor_conf:.2f})")
+        logger.info(f"Worker {worker_id} TDS ledger: {tds_name} ({tds_conf:.2f})")
+
+        # Normalize NOT_FOUND for TDS
+        if tds_name == NOT_FOUND:
+            tds_name, tds_conf = None, 0
+
+        return expense_name, expense_conf, vendor_name_result, vendor_conf, tds_name, tds_conf
+
+
+    async def _finalize_and_save(
+        self, worker_id: int, task: TaskItem, invoice_data: InvoiceData,
+        expense_ledger_name, expense_confidence,
+        vendor_ledger_name, vendor_confidence,
+        tds_ledger_name, tds_confidence
+    ):
+        """Step 8: Generate XL rows, persist results to session, and mark task complete."""
+        voucher_number = await self._get_next_voucher_number(task.batch_id)
+
+        xl_rows = XLOutputGenerator.generate_xl_output_rows(
+            invoice_data=invoice_data,
+            expense_ledger_name=expense_ledger_name,
+            vendor_ledger_name=vendor_ledger_name,
+            expense_confidence=expense_confidence,
+            vendor_confidence=vendor_confidence,
+            voucher_number=voucher_number,
+            tds_section=tds_ledger_name,
+            tds_confidence=tds_confidence
+        )
+        logger.info(f"Worker {worker_id} generated {len(xl_rows)} XL rows for {task.filename} with voucher #{voucher_number}")
+
+        json_path = self.file_handler.get_json_path(task.batch_id, task.filename)
+        self.file_handler.save_json_result(task.batch_id, task.filename, invoice_data.model_dump())
+
+        result = ProcessedInvoiceResult(
+            filename=task.filename, pdf_path=task.pdf_path, json_path=json_path,
+            status="success", invoice_number=invoice_data.header.invoice_number,
+            vendor_name=invoice_data.header.vendor_name, total_amount=invoice_data.total_amount,
+            currency=invoice_data.currency, line_items_count=len(invoice_data.line_items),
+            xl_output=[row.model_dump() for row in xl_rows],
+            data=invoice_data, timestamp=datetime.utcnow().isoformat()
+        )
+
+        session = self.session_manager.get_session(task.batch_id)
+        if session:
+            processed_results_raw = session.get("processed_results", [])
+            if isinstance(processed_results_raw, str):
+                try:
+                    processed_results = json.loads(processed_results_raw)
+                except (json.JSONDecodeError, TypeError):
+                    processed_results = []
+            else:
+                processed_results = processed_results_raw if isinstance(processed_results_raw, list) else []
+
+            processed_results.append(result.model_dump())
+            self.session_manager.update_session(task.batch_id, {"processed_results": processed_results})
+
+        self.session_manager.update_file_status(task.batch_id, task.filename, "success")
+        await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
+        logger.info(f"✅ Worker {worker_id} completed {task.filename}: {len(xl_rows)} XL rows generated")
+
+
+    def _safe_parse_ledger(self, response: OllamaResponse, ledger_options, schema, worker_id: int, label: str):
+        """
+        Parse an LLM response into (ledger_name, confidence).
+        Returns (NOT_FOUND, 0.0) on timeout, error, or empty parse.
+        """
+        if isinstance(response, (Exception, TimeoutError)):
+            logger.error(f"Worker {worker_id} LLM timeout/error for {label}: {response}")
+            return NOT_FOUND, 0.0
+        if not response.success:
+            logger.error(f"Worker {worker_id} LLM failed for {label}")
+            return NOT_FOUND, 0.0
+
+        name, confidence = self._parse_ledger_response(
+            response.response_text, ledger_options,
+            get_pydantic_schema=schema, worker_id=worker_id
+        )
+        return (name, confidence) if name else (NOT_FOUND, 0.0)
+
+
+    async def _fail_task(self, task: TaskItem, error: str):
+        """Mark a task as failed and remove it from the Redis processing set."""
+        self.session_manager.update_file_status(task.batch_id, task.filename, "failed", error=error)
+        await self.redis.delete(f"{self.PROCESSING_PREFIX}{task.task_id}")
+        # Note: Redis delete is async — caller must await separately if needed outside async context.
+        # For use inside async methods, prefer: await self.redis.delete(...)
+
 
 
 # Singleton instance
