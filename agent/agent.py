@@ -285,7 +285,7 @@ async def run_agent(
         # MAX_TURNS exceeded
         root_span.update_trace(
             output={"error": f"MAX_TURNS ({MAX_TURNS}) exceeded without selection"},
-            level="ERROR",
+            # level="ERROR",
         )
         raise RuntimeError(
             f"Agent exceeded MAX_TURNS ({MAX_TURNS}) without calling select_leaf. "
